@@ -6,11 +6,11 @@
     "author_profile": "https://ftw.digital",
     "homepage": "https://ftw.digital",
     "download_url": "https://github.com/dawsman/wp-mcp-connect-lite/releases/download/v1.0.0/wp-mcp-connect-1.0.0.zip",
-    "zip_sha256": "7db7c5c7dd53672968955753e5001592fc6933739bcefbea22e1d1e07cecd962",
+    "zip_sha256": "2de5bd94426b698f3f166b646c45d57b6b4e4d0a7cf9ed578bfcc9a9b00659f2",
     "requires": "5.0",
     "tested": "6.7",
     "requires_php": "7.4",
-    "last_updated": "2026-04-08",
+    "last_updated": "2026-04-25",
     "sections": {
         "description": "<p>A WordPress plugin to expose enhanced API endpoints for MCP clients, enabling SEO management, content editing, and redirections.</p>",
         "changelog": "<h4>1.0.0</h4><ul><li>Initial release.</li></ul>",
