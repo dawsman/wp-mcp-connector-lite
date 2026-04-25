@@ -3,7 +3,7 @@
  * Plugin Name:       WP MCP Connect Lite
  * Plugin URI:        https://ftw.digital
  * Description:       Headless REST API plugin for MCP clients — SEO management, content editing, redirections, and more. Lite version (no admin dashboard).
- * Version:           1.0.0
+ * Version:           1.0.1
  * Author:            ftw.digital
  * Author URI:        https://ftw.digital
  * License:           GPL-2.0+
@@ -20,7 +20,7 @@ if ( ! defined( 'WPINC' ) ) {
 	die;
 }
 
-define( 'WP_MCP_CONNECT_VERSION', '1.0.0' );
+define( 'WP_MCP_CONNECT_VERSION', '1.0.1' );
 define( 'WP_MCP_CONNECT_MIN_WP_VERSION', '5.0' );
 define( 'WP_MCP_CONNECT_MIN_PHP_VERSION', '7.4' );
 define( 'WP_MCP_CONNECT_PATH', plugin_dir_path( __FILE__ ) );
