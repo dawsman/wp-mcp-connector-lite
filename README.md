@@ -2,12 +2,11 @@
 
 <br>
 
-<h1>
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://img.shields.io/badge/WP%20MCP%20Connect-Lite-3858E9?style=for-the-badge&labelColor=0b0d12">
-    <img alt="WP MCP Connect — Lite" src="https://img.shields.io/badge/WP%20MCP%20Connect-Lite-3858E9?style=for-the-badge&labelColor=ffffff">
-  </picture>
-</h1>
+<a href="https://github.com/dawsman/wp-mcp-connector-lite">
+  <img src="assets/logo.svg" alt="WP MCP Connect Lite" width="100%">
+</a>
+
+<br>
 
 ### Give your AI a WordPress backstage pass.
 
@@ -91,14 +90,16 @@ Weekly SEO health digest with email delivery and a queryable audit log.
 
 ```mermaid
 flowchart LR
-    A[🤖 MCP Client<br/><sub>Claude · Cursor · VS Code</sub>] -->|stdio| B[🟢 MCP Server<br/><sub>Node / TS</sub>]
-    B -->|HTTPS + App Password| C[🐘 WordPress<br/><sub><b>this plugin</b></sub>]
-    C --> D[(💾 wp_posts<br/>wp_postmeta)]
-    C -.-> E[🔎 Google<br/>Search Console]
+    A["🤖 MCP Client"] -->|stdio| B["🟢 MCP Server"]
+    B -->|"HTTPS + App Password"| C["🐘 WordPress + this plugin"]
+    C --> D[("💾 Database")]
+    C -.->|"OAuth"| E["🔎 Search Console"]
 
-    style C fill:#3858E9,stroke:#1e3a8a,color:#fff
-    style A fill:#0b0d12,stroke:#3858E9,color:#fff
-    style B fill:#22c55e,stroke:#15803d,color:#fff
+    style A fill:#0b0d12,stroke:#3858E9,color:#fff,stroke-width:2px
+    style B fill:#22c55e,stroke:#15803d,color:#fff,stroke-width:2px
+    style C fill:#3858E9,stroke:#1e3a8a,color:#fff,stroke-width:2px
+    style D fill:#1e1b4b,stroke:#a78bfa,color:#e9d5ff,stroke-width:2px
+    style E fill:#1e1b4b,stroke:#fbbf24,color:#fef3c7,stroke-width:2px
 ```
 
 Your MCP client talks to a thin Node server. That server hits **`/wp-json/mcp/v1/*`** on your site, which this plugin registers and authenticates using a WordPress Application Password.
