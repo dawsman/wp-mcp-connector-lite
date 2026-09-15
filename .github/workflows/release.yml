@@ -61,6 +61,11 @@ jobs:
             php -l "$f"
           done
 
+      # ubuntu-24.04 runners no longer ship svn, which install-wp-tests.sh
+      # uses to fetch the WordPress test library.
+      - name: Install Subversion
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq subversion
+
       - name: Install WordPress test suite
         run: bash bin/install-wp-tests.sh wp_test root root 127.0.0.1 latest
 
