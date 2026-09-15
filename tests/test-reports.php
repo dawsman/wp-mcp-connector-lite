@@ -120,7 +120,6 @@ class WP_MCP_Connect_Reports_Test extends WP_UnitTestCase {
 		$this->assertArrayHasKey( 'broken_links', $summary );
 		$this->assertArrayHasKey( 'broken_images', $summary );
 		$this->assertArrayHasKey( 'orphaned_content', $summary );
-		$this->assertArrayHasKey( 'gsc_overview', $summary );
 	}
 
 	// ========================================================================

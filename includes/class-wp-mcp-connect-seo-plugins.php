@@ -43,7 +43,10 @@ class WP_MCP_Connect_SEO_Plugins {
 				'og_title'        => '_yoast_wpseo_opengraph-title',
 				'og_description'  => '_yoast_wpseo_opengraph-description',
 				'og_image_id'     => '_yoast_wpseo_opengraph-image-id',
-				'schema_json'          => '_yoast_wpseo_schema_page_type',
+				// Yoast's schema page-type meta holds a schema *type string* ('WebPage',
+				// 'AboutPage'), not a JSON-LD document. Writing a JSON blob there corrupts the
+				// post's Yoast page-type setting, so JSON-LD lives in our own meta key instead.
+				'schema_json'          => '_cwp_schema_json',
 				'focus_keyword'        => '_yoast_wpseo_focuskw',
 				'cornerstone_content'  => '_yoast_wpseo_is_cornerstone',
 			),
@@ -51,15 +54,31 @@ class WP_MCP_Connect_SEO_Plugins {
 		'aioseo' => array(
 			'file'      => 'all-in-one-seo-pack/all_in_one_seo_pack.php',
 			'name'      => 'All in One SEO',
+			/*
+			 * AIOSEO 4.x dropped its legacy 2.x/3.x post meta keys and moved per-post SEO into its
+			 * own {$wpdb->prefix}aioseo_posts table. Only schema_json still lives in post meta,
+			 * in our own key. Every other field is dispatched to get_aioseo_value() /
+			 * set_aioseo_value(), which read and write the table via AIOSEO's Post model.
+			 * The empty strings keep get_meta_key() honest: there is no post meta key.
+			 */
 			'meta_keys' => array(
-				'seo_title'       => '_aioseo_title',
-				'seo_description' => '_aioseo_description',
-				'og_title'        => '_aioseo_og_title',
-				'og_description'  => '_aioseo_og_description',
-				'og_image_id'     => '_aioseo_og_image_custom_url',
-				'schema_json'          => '_aioseo_schema',
-				'focus_keyword'        => '_aioseo_focus_keyword',
+				'seo_title'            => '',
+				'seo_description'      => '',
+				'og_title'             => '',
+				'og_description'       => '',
+				'og_image_id'          => '',
+				'schema_json'          => '_cwp_schema_json',
+				'focus_keyword'        => '',
 				'cornerstone_content'  => '',
+			),
+			'columns'   => array(
+				'seo_title'            => 'title',
+				'seo_description'      => 'description',
+				'og_title'             => 'og_title',
+				'og_description'       => 'og_description',
+				'og_image_id'          => 'og_image_custom_url',
+				'focus_keyword'        => 'keyphrases',
+				'cornerstone_content'  => 'pillar_content',
 			),
 		),
 		'cwp' => array(
@@ -156,30 +175,79 @@ class WP_MCP_Connect_SEO_Plugins {
 	}
 
 	/**
-	 * Get an SEO value from the active plugin's meta field.
+	 * Get an SEO value from the active plugin's storage.
+	 *
+	 * schema_json always reads from our own _cwp_schema_json meta key first, whichever
+	 * SEO plugin is active, and only falls back to a native lookup when that is empty.
+	 * AIOSEO fields (other than schema_json) live in the aioseo_posts table, not post meta.
 	 *
 	 * @since    1.0.0
 	 * @param    int       $post_id    The post ID.
 	 * @param    string    $field      The SEO field name.
-	 * @return   mixed                 The meta value.
+	 * @return   mixed                 The value, or null when the active plugin has no home for the field.
 	 */
 	public static function get_seo_value( $post_id, $field ) {
-		$meta_key = self::get_meta_key( $field );
-		$value = get_post_meta( $post_id, $meta_key, true );
-
-		// Rank Math stores schema as a PHP array in proprietary wrapper format - unwrap and convert to JSON.
 		$plugin = self::detect_active_plugin();
-		if ( 'schema_json' === $field && is_array( $value ) && 'rank_math' === $plugin['slug'] ) {
-			$value = self::unwrap_schema_from_rank_math( $value );
+
+		if ( 'schema_json' === $field ) {
+			return self::get_schema_json_value( $post_id, $plugin );
+		}
+
+		if ( 'aioseo' === $plugin['slug'] ) {
+			return self::get_aioseo_value( $post_id, $field );
+		}
+
+		$meta_key = self::get_meta_key( $field );
+		if ( '' === $meta_key ) {
+			// The active plugin has no storage for this field.
+			return null;
+		}
+
+		return get_post_meta( $post_id, $meta_key, true );
+	}
+
+	/**
+	 * Read the JSON-LD schema for a post.
+	 *
+	 * Canonical storage is _cwp_schema_json for every SEO plugin, because none of the
+	 * third-party plugins expose a field that holds a raw JSON-LD document:
+	 *  - Yoast's schema page-type meta holds a schema *type string*, not a document.
+	 *  - AIOSEO's `schema` column holds AIOSEO's own graph *options* structure.
+	 * Only Rank Math has a genuine (if proprietary) schema store, so it alone gets a
+	 * read-only fallback so schema authored inside Rank Math stays visible.
+	 *
+	 * @since    1.0.0
+	 * @access   private
+	 * @param    int       $post_id    The post ID.
+	 * @param    array     $plugin     The active plugin data.
+	 * @return   string                The schema as a JSON string, or '' when there is none.
+	 */
+	private static function get_schema_json_value( $post_id, $plugin ) {
+		$value = get_post_meta( $post_id, '_cwp_schema_json', true );
+
+		if ( is_array( $value ) && ! empty( $value ) ) {
 			return wp_json_encode( $value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
 		}
 
-		// Other plugins: convert array schema to JSON as-is.
-		if ( 'schema_json' === $field && is_array( $value ) ) {
-			return wp_json_encode( $value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+		if ( is_string( $value ) && '' !== trim( $value ) ) {
+			return $value;
 		}
 
-		return $value;
+		// Read-only fallback: schema authored natively in Rank Math.
+		if ( 'rank_math' === $plugin['slug'] ) {
+			$native = get_post_meta( $post_id, 'rank_math_schema', true );
+
+			if ( is_array( $native ) && ! empty( $native ) ) {
+				$unwrapped = self::unwrap_schema_from_rank_math( $native );
+				return wp_json_encode( $unwrapped, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+			}
+
+			if ( is_string( $native ) && '' !== trim( $native ) ) {
+				return $native;
+			}
+		}
+
+		return '';
 	}
 
 	/**
@@ -668,28 +736,49 @@ class WP_MCP_Connect_SEO_Plugins {
 	}
 
 	/**
-	 * Set an SEO value to the active plugin's meta field.
+	 * Set an SEO value on the active plugin's storage.
+	 *
+	 * schema_json always writes to our own _cwp_schema_json meta key, whichever SEO plugin
+	 * is active (see get_schema_json_value() for why). AIOSEO fields go to the aioseo_posts
+	 * table. Clearing a field is idempotent: passing an empty value always reports success,
+	 * even when there was nothing stored to remove.
 	 *
 	 * @since    1.0.0
 	 * @param    int       $post_id    The post ID.
 	 * @param    string    $field      The SEO field name.
-	 * @param    mixed     $value      The value to set.
-	 * @return   bool                  True on success, false on failure.
+	 * @param    mixed     $value      The value to set. An empty value clears the field.
+	 * @return   bool|WP_Error         True on success, false on failure, WP_Error when the
+	 *                                 active plugin has no storage for the field.
 	 */
 	public static function set_seo_value( $post_id, $field, $value ) {
-		$meta_key = self::get_meta_key( $field );
+		$plugin    = self::detect_active_plugin();
+		$is_clear  = self::is_empty_seo_value( $value );
 
-		if ( empty( $value ) ) {
-			return delete_post_meta( $post_id, $meta_key );
+		// Schema is stored in our own meta key for every plugin. None of the third-party
+		// plugins expose a field that holds a raw JSON-LD document, and writing into the
+		// ones that look like they might (Yoast's page-type string, Rank Math's internal
+		// wrapper array) corrupts their own settings.
+		if ( 'schema_json' === $field ) {
+			if ( $is_clear ) {
+				delete_post_meta( $post_id, '_cwp_schema_json' );
+				return true;
+			}
+
+			return (bool) update_post_meta( $post_id, '_cwp_schema_json', $value );
 		}
 
-		// For RankMath: Don't write to rank_math_schema as it breaks RankMath's UI.
-		// Store schema in our own _cwp_schema_json meta key instead.
-		// RankMath's internal format is fragile and can cause JS errors in the admin.
-		$plugin = self::detect_active_plugin();
-		if ( 'schema_json' === $field && 'rank_math' === $plugin['slug'] ) {
-			// Write to our own meta key instead of RankMath's internal meta.
-			return update_post_meta( $post_id, '_cwp_schema_json', $value );
+		if ( 'aioseo' === $plugin['slug'] ) {
+			return self::set_aioseo_value( $post_id, $field, $value, $is_clear );
+		}
+
+		$meta_key = self::get_meta_key( $field );
+		if ( '' === $meta_key ) {
+			return self::unsupported_field_error( $plugin['name'], $field );
+		}
+
+		if ( $is_clear ) {
+			delete_post_meta( $post_id, $meta_key );
+			return true;
 		}
 
 		// Rank Math handling - use direct update_post_meta for all fields.
@@ -698,17 +787,55 @@ class WP_MCP_Connect_SEO_Plugins {
 		if ( 'rank_math' === $plugin['slug'] ) {
 			$result = update_post_meta( $post_id, $meta_key, $value );
 			self::debug_log_seo_save( $post_id, $field, $meta_key, $value, 'direct_meta' );
-			return $result;
+			return (bool) $result;
 		}
 
 		// Use Yoast's WPSEO_Meta class for proper handling and validation
 		if ( 'yoast' === $plugin['slug'] && class_exists( 'WPSEO_Meta' ) ) {
 			// WPSEO_Meta::set_value() expects the key without the '_yoast_wpseo_' prefix
 			$yoast_key = str_replace( '_yoast_wpseo_', '', $meta_key );
-			return WPSEO_Meta::set_value( $yoast_key, $value, $post_id );
+			return (bool) WPSEO_Meta::set_value( $yoast_key, $value, $post_id );
 		}
 
-		return update_post_meta( $post_id, $meta_key, $value );
+		return (bool) update_post_meta( $post_id, $meta_key, $value );
+	}
+
+	/**
+	 * Whether a value passed to set_seo_value() means "clear this field".
+	 *
+	 * @since    1.0.0
+	 * @access   private
+	 * @param    mixed    $value    The incoming value.
+	 * @return   bool               True when the field should be cleared.
+	 */
+	private static function is_empty_seo_value( $value ) {
+		if ( is_array( $value ) ) {
+			return empty( $value );
+		}
+
+		return ( null === $value || '' === $value || 0 === $value || '0' === $value || false === $value );
+	}
+
+	/**
+	 * Build the WP_Error returned when a plugin has no storage for a field.
+	 *
+	 * @since    1.0.0
+	 * @access   private
+	 * @param    string    $plugin_name    The active plugin's display name.
+	 * @param    string    $field          The SEO field name.
+	 * @return   WP_Error
+	 */
+	private static function unsupported_field_error( $plugin_name, $field ) {
+		return new WP_Error(
+			'unsupported_field',
+			sprintf(
+				/* translators: 1: SEO plugin name, 2: SEO field name. */
+				__( '%1$s does not support %2$s', 'wp-mcp-connect' ),
+				$plugin_name,
+				$field
+			),
+			array( 'status' => 400 )
+		);
 	}
 
 	/**
@@ -757,6 +884,481 @@ class WP_MCP_Connect_SEO_Plugins {
 				$status
 			)
 		);
+	}
+
+	/*
+	 * ---------------------------------------------------------------------------------
+	 * All in One SEO 4.x / 5.x storage.
+	 *
+	 * Verified against the plugin source on the WordPress.org SVN trunk (version 5.0.1.1,
+	 * fetched 2026-09-15 from https://plugins.svn.wordpress.org/all-in-one-seo-pack/trunk/):
+	 *
+	 *   app/Common/Models/Post.php
+	 *     - namespace AIOSEO\Plugin\Common\Models; class Post extends Model
+	 *     - protected $table = 'aioseo_posts';
+	 *     - public static function getPost( $postId ) : Post - always returns a model;
+	 *       $post->exists() is false when no row has been written for the post yet.
+	 *     - public static function savePost( $postId, array $data ) - patch semantics:
+	 *       sanitizeAndSetDefaults() only assigns keys present in $data, so a partial save
+	 *       leaves every other column untouched. Returns a string on DB error, null on
+	 *       success, false when $data is empty.
+	 *     - $jsonFields includes keyphrases, schema, additional_keywords.
+	 *     - $booleanFields includes pillar_content.
+	 *     - getSanitizeFieldMap() maps the input keys used below to columns:
+	 *         title => title (text), description => description (text),
+	 *         pillar_content => pillar_content (bool), og_title => og_title (text),
+	 *         og_description => og_description (text),
+	 *         og_image_type => og_image_type (text, default 'default'),
+	 *         og_image_custom_url => og_image_custom_url (url).
+	 *     - keyphrases and focus_keyword are handled inline in sanitizeAndSetDefaults().
+	 *       AIOSEO 5.0.0.1 added a dedicated focus_keyword varchar(255) column alongside
+	 *       the legacy keyphrases longtext JSON and keeps the two in sync
+	 *       (getKeywordColumnsWithLegacyFallback()), so we write both keys and read the
+	 *       column first with a fallback to the JSON.
+	 *     - keyphrases JSON shape, from getKeyphrasesDefaults():
+	 *         { "focus": { "keyphrase": "", "score": 0, "analysis": {...} }, "additional": [] }
+	 *
+	 *   app/Common/Social/Image.php - og_image_type === 'custom_image' is the value that
+	 *   makes AIOSEO read og_image_custom_url when building the og:image tag.
+	 *
+	 *   app/Common/Utils/Database.php - 'aioseo_posts' is a registered custom table, created
+	 *   through dbDelta by Updates::addInitialCustomTablesForV4().
+	 *
+	 * Note: AIOSEO's own `schema` column stores AIOSEO's structured graph *options*, not a raw
+	 * JSON-LD document, so schema_json is deliberately not mapped onto it. See
+	 * get_schema_json_value().
+	 *
+	 * Note: post_id is not a unique key on aioseo_posts (AIOSEO ships its own
+	 * Updates::removeDuplicateRecords() to clean duplicates up), so the direct-SQL fallback
+	 * does a SELECT-then-INSERT/UPDATE rather than INSERT ... ON DUPLICATE KEY UPDATE.
+	 * ---------------------------------------------------------------------------------
+	 */
+
+	/**
+	 * The fully-qualified class name of AIOSEO's Post model.
+	 *
+	 * @since    1.0.0
+	 * @var      string
+	 */
+	private const AIOSEO_POST_MODEL = 'AIOSEO\\Plugin\\Common\\Models\\Post';
+
+	/**
+	 * Get the prefixed aioseo_posts table name.
+	 *
+	 * @since    1.0.0
+	 * @access   private
+	 * @return   string    The table name.
+	 */
+	private static function get_aioseo_table() {
+		global $wpdb;
+
+		return $wpdb->prefix . 'aioseo_posts';
+	}
+
+	/**
+	 * Whether the aioseo_posts table exists. Cached for the request.
+	 *
+	 * @since    1.0.0
+	 * @access   private
+	 * @return   bool    True when the table exists.
+	 */
+	private static function aioseo_table_exists() {
+		static $exists = null;
+
+		if ( null !== $exists ) {
+			return $exists;
+		}
+
+		global $wpdb;
+		$table = self::get_aioseo_table();
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
+
+		$exists = ( $found === $table );
+
+		return $exists;
+	}
+
+	/**
+	 * Get the AIOSEO data source for a post: the Post model when AIOSEO is loaded,
+	 * otherwise the raw table row.
+	 *
+	 * @since    1.0.0
+	 * @access   private
+	 * @param    int    $post_id    The post ID.
+	 * @return   object|null        The Post model or a stdClass row, null when there is no data.
+	 */
+	private static function get_aioseo_source( $post_id ) {
+		if ( function_exists( 'aioseo' ) && class_exists( self::AIOSEO_POST_MODEL ) ) {
+			$model = call_user_func( array( self::AIOSEO_POST_MODEL, 'getPost' ), $post_id );
+
+			// getPost() always returns a model; exists() is false when no row has been
+			// written yet, and also during the early bootstrap where AIOSEO's DB layer is
+			// not ready. Fall through to the raw row in both cases.
+			if ( is_object( $model ) && ( ! method_exists( $model, 'exists' ) || $model->exists() ) ) {
+				return $model;
+			}
+		}
+
+		return self::get_aioseo_row( $post_id );
+	}
+
+	/**
+	 * Read the raw aioseo_posts row for a post.
+	 *
+	 * @since    1.0.0
+	 * @access   private
+	 * @param    int    $post_id    The post ID.
+	 * @return   object|null        The row, or null when there is none.
+	 */
+	private static function get_aioseo_row( $post_id ) {
+		if ( ! self::aioseo_table_exists() ) {
+			return null;
+		}
+
+		global $wpdb;
+		$table = self::get_aioseo_table();
+
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$row = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM `{$table}` WHERE post_id = %d LIMIT 1", absint( $post_id ) ) );
+
+		return is_object( $row ) ? $row : null;
+	}
+
+	/**
+	 * Get an SEO value from AIOSEO's aioseo_posts table.
+	 *
+	 * @since    1.0.0
+	 * @access   private
+	 * @param    int       $post_id    The post ID.
+	 * @param    string    $field      The SEO field name.
+	 * @return   mixed                 The value, '' when unset, null when unsupported.
+	 */
+	private static function get_aioseo_value( $post_id, $field ) {
+		$columns = self::$plugins['aioseo']['columns'];
+
+		if ( ! isset( $columns[ $field ] ) ) {
+			return null;
+		}
+
+		$source = self::get_aioseo_source( $post_id );
+		if ( null === $source ) {
+			return '';
+		}
+
+		if ( 'og_image_id' === $field ) {
+			$url = isset( $source->og_image_custom_url ) ? $source->og_image_custom_url : '';
+
+			return self::aioseo_og_image_id_from_url( $url );
+		}
+
+		if ( 'focus_keyword' === $field ) {
+			// AIOSEO >= 5.0.0.1 keeps a dedicated column; older rows only have the JSON.
+			if ( ! empty( $source->focus_keyword ) && is_string( $source->focus_keyword ) ) {
+				return $source->focus_keyword;
+			}
+
+			return self::decode_aioseo_focus_keyphrase( isset( $source->keyphrases ) ? $source->keyphrases : null );
+		}
+
+		if ( 'cornerstone_content' === $field ) {
+			return empty( $source->pillar_content ) ? '' : '1';
+		}
+
+		$column = $columns[ $field ];
+
+		if ( ! isset( $source->$column ) || null === $source->$column ) {
+			return '';
+		}
+
+		return $source->$column;
+	}
+
+	/**
+	 * Set an SEO value on AIOSEO's aioseo_posts table.
+	 *
+	 * @since    1.0.0
+	 * @access   private
+	 * @param    int       $post_id     The post ID.
+	 * @param    string    $field       The SEO field name.
+	 * @param    mixed     $value       The value to set.
+	 * @param    bool      $is_clear    Whether the value means "clear this field".
+	 * @return   bool|WP_Error          True on success, WP_Error on failure or unsupported field.
+	 */
+	private static function set_aioseo_value( $post_id, $field, $value, $is_clear ) {
+		$columns     = self::$plugins['aioseo']['columns'];
+		$plugin_name = self::$plugins['aioseo']['name'];
+
+		if ( ! isset( $columns[ $field ] ) ) {
+			return self::unsupported_field_error( $plugin_name, $field );
+		}
+
+		$data = array();
+
+		switch ( $field ) {
+			case 'og_image_id':
+				$url = $is_clear ? '' : self::aioseo_og_image_url_from_id( $value );
+
+				if ( ! $is_clear && '' === $url ) {
+					return new WP_Error(
+						'invalid_attachment',
+						sprintf(
+							/* translators: %s: attachment ID. */
+							__( 'Attachment %s has no URL, so it cannot be used as the Open Graph image.', 'wp-mcp-connect' ),
+							(string) $value
+						),
+						array( 'status' => 400 )
+					);
+				}
+
+				$data['og_image_custom_url'] = $url;
+				$data['og_image_type']       = '' === $url ? 'default' : 'custom_image';
+				break;
+
+			case 'focus_keyword':
+				$keyword  = $is_clear ? '' : (string) $value;
+				$source   = self::get_aioseo_source( $post_id );
+				$existing = ( $source && isset( $source->keyphrases ) ) ? $source->keyphrases : null;
+
+				// Write both representations: the legacy JSON (all versions) and the
+				// dedicated column (5.0.0.1+, ignored by older versions).
+				$data['keyphrases']    = self::encode_aioseo_keyphrases( $existing, $keyword );
+				$data['focus_keyword'] = $keyword;
+				break;
+
+			case 'cornerstone_content':
+				$data['pillar_content'] = ! $is_clear;
+				break;
+
+			default:
+				$data[ $columns[ $field ] ] = $is_clear ? '' : $value;
+				break;
+		}
+
+		if ( function_exists( 'aioseo' ) && class_exists( self::AIOSEO_POST_MODEL ) && method_exists( self::AIOSEO_POST_MODEL, 'savePost' ) ) {
+			$result = call_user_func( array( self::AIOSEO_POST_MODEL, 'savePost' ), $post_id, $data );
+
+			// savePost() returns the DB error message on failure and null on success.
+			if ( is_string( $result ) && '' !== $result ) {
+				return new WP_Error( 'aioseo_save_failed', $result, array( 'status' => 500 ) );
+			}
+
+			return true;
+		}
+
+		return self::set_aioseo_value_direct( $post_id, $data );
+	}
+
+	/**
+	 * Write AIOSEO column data straight to aioseo_posts when the Post model is unavailable.
+	 *
+	 * Every key set_aioseo_value() builds is both a valid savePost() input key and the
+	 * matching column name (title, description, og_title, og_description, og_image_type,
+	 * og_image_custom_url, keyphrases, focus_keyword, pillar_content), so the same array
+	 * serves both paths. set_aioseo_robots_noindex() is the one caller that has to
+	 * translate, because the robots input keys are shortened ('noindex' -> robots_noindex).
+	 *
+	 * @since    1.0.0
+	 * @access   private
+	 * @param    int      $post_id    The post ID.
+	 * @param    array    $data       Column => value pairs.
+	 * @return   bool|WP_Error        True on success, WP_Error when the table is missing.
+	 */
+	private static function set_aioseo_value_direct( $post_id, $data ) {
+		if ( ! self::aioseo_table_exists() ) {
+			return new WP_Error(
+				'aioseo_table_missing',
+				__( 'The All in One SEO posts table is not available.', 'wp-mcp-connect' ),
+				array( 'status' => 500 )
+			);
+		}
+
+		global $wpdb;
+		$table   = self::get_aioseo_table();
+		$post_id = absint( $post_id );
+
+		// keyphrases is a JSON column; the model would encode it for us.
+		if ( isset( $data['keyphrases'] ) && ! is_string( $data['keyphrases'] ) ) {
+			$data['keyphrases'] = wp_json_encode( $data['keyphrases'] );
+		}
+
+		if ( isset( $data['pillar_content'] ) ) {
+			$data['pillar_content'] = $data['pillar_content'] ? 1 : 0;
+		}
+
+		$now      = gmdate( 'Y-m-d H:i:s' );
+		$existing = self::get_aioseo_row( $post_id );
+
+		if ( $existing && isset( $existing->id ) ) {
+			$data['updated'] = $now;
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$updated = $wpdb->update( $table, $data, array( 'post_id' => $post_id ) );
+
+			return false !== $updated;
+		}
+
+		$data['post_id'] = $post_id;
+		$data['created'] = $now;
+		$data['updated'] = $now;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$inserted = $wpdb->insert( $table, $data );
+
+		return false !== $inserted;
+	}
+
+	/**
+	 * Set AIOSEO's robots noindex flag on the aioseo_posts table.
+	 *
+	 * AIOSEO 4.x keeps robots settings in the same table as the rest of the post's SEO.
+	 * Setting robots_default to false is what tells AIOSEO to honour the explicit flag
+	 * rather than fall back to the site-wide default for the post type.
+	 *
+	 * @since    1.0.0
+	 * @param    int     $post_id    The post ID.
+	 * @param    bool    $noindex    Whether the post should be noindexed.
+	 * @return   bool|WP_Error       True on success, WP_Error on failure.
+	 */
+	public static function set_aioseo_robots_noindex( $post_id, $noindex ) {
+		$data = array(
+			'default' => false,
+			'noindex' => (bool) $noindex,
+		);
+
+		if ( function_exists( 'aioseo' ) && class_exists( self::AIOSEO_POST_MODEL ) && method_exists( self::AIOSEO_POST_MODEL, 'savePost' ) ) {
+			$result = call_user_func( array( self::AIOSEO_POST_MODEL, 'savePost' ), $post_id, $data );
+
+			if ( is_string( $result ) && '' !== $result ) {
+				return new WP_Error( 'aioseo_save_failed', $result, array( 'status' => 500 ) );
+			}
+
+			return true;
+		}
+
+		// Direct SQL uses the column names, not the model's input keys.
+		return self::set_aioseo_value_direct(
+			$post_id,
+			array(
+				'robots_default' => 0,
+				'robots_noindex' => $noindex ? 1 : 0,
+			)
+		);
+	}
+
+	/**
+	 * Decode AIOSEO's keyphrases column into an array.
+	 *
+	 * Accepts the JSON string stored in the column, or the decoded object/array the
+	 * Post model exposes.
+	 *
+	 * @since    1.0.0
+	 * @param    mixed    $keyphrases    The raw keyphrases value.
+	 * @return   array                   The decoded structure, or an empty array.
+	 */
+	public static function decode_aioseo_keyphrases( $keyphrases ) {
+		if ( empty( $keyphrases ) ) {
+			return array();
+		}
+
+		if ( is_string( $keyphrases ) ) {
+			$decoded = json_decode( $keyphrases, true );
+
+			return is_array( $decoded ) ? $decoded : array();
+		}
+
+		if ( is_array( $keyphrases ) || is_object( $keyphrases ) ) {
+			$decoded = json_decode( (string) wp_json_encode( $keyphrases ), true );
+
+			return is_array( $decoded ) ? $decoded : array();
+		}
+
+		return array();
+	}
+
+	/**
+	 * Extract the focus keyphrase from AIOSEO's keyphrases structure.
+	 *
+	 * @since    1.0.0
+	 * @param    mixed    $keyphrases    The raw keyphrases value.
+	 * @return   string                  The focus keyphrase, or '' when there is none.
+	 */
+	public static function decode_aioseo_focus_keyphrase( $keyphrases ) {
+		$data = self::decode_aioseo_keyphrases( $keyphrases );
+
+		if ( isset( $data['focus']['keyphrase'] ) && is_scalar( $data['focus']['keyphrase'] ) ) {
+			return (string) $data['focus']['keyphrase'];
+		}
+
+		return '';
+	}
+
+	/**
+	 * Set the focus keyphrase on AIOSEO's keyphrases structure, preserving everything else.
+	 *
+	 * Additional keyphrases and per-keyphrase analysis on the existing structure are kept
+	 * intact; only focus.keyphrase is replaced.
+	 *
+	 * @since    1.0.0
+	 * @param    mixed     $keyphrases       The existing keyphrases value (string, array, object or null).
+	 * @param    string    $focus_keyword    The focus keyphrase to set.
+	 * @return   array                       The updated keyphrases structure.
+	 */
+	public static function encode_aioseo_keyphrases( $keyphrases, $focus_keyword ) {
+		$data = self::decode_aioseo_keyphrases( $keyphrases );
+
+		if ( ! isset( $data['focus'] ) || ! is_array( $data['focus'] ) ) {
+			$data['focus'] = array();
+		}
+
+		$data['focus']['keyphrase'] = (string) $focus_keyword;
+
+		if ( ! isset( $data['focus']['score'] ) ) {
+			$data['focus']['score'] = 0;
+		}
+
+		if ( ! isset( $data['additional'] ) || ! is_array( $data['additional'] ) ) {
+			$data['additional'] = array();
+		}
+
+		return $data;
+	}
+
+	/**
+	 * Convert an attachment ID to the URL AIOSEO stores in og_image_custom_url.
+	 *
+	 * @since    1.0.0
+	 * @param    mixed     $attachment_id    The attachment ID.
+	 * @return   string                      The attachment URL, or '' when there is none.
+	 */
+	public static function aioseo_og_image_url_from_id( $attachment_id ) {
+		$attachment_id = absint( $attachment_id );
+
+		if ( ! $attachment_id ) {
+			return '';
+		}
+
+		$url = wp_get_attachment_url( $attachment_id );
+
+		return $url ? $url : '';
+	}
+
+	/**
+	 * Convert AIOSEO's og_image_custom_url back to an attachment ID.
+	 *
+	 * @since    1.0.0
+	 * @param    mixed     $url    The stored image URL.
+	 * @return   int|string        The attachment ID, or '' when the URL is empty or unknown.
+	 */
+	public static function aioseo_og_image_id_from_url( $url ) {
+		if ( empty( $url ) || ! is_string( $url ) ) {
+			return '';
+		}
+
+		$attachment_id = attachment_url_to_postid( $url );
+
+		return $attachment_id ? (int) $attachment_id : '';
 	}
 
 	/**

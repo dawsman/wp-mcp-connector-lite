@@ -112,7 +112,7 @@ class WP_MCP_Connect_Webhooks {
 	 * Last-chance SSRF guard fired from inside WP's HTTP API.
 	 *
 	 * Applies only to requests that opted in via the `cwp_ssrf_guard` arg so
-	 * legitimate outbound traffic from other plugin code (GSC, updater, etc.)
+	 * legitimate outbound traffic from other plugin code (updater, etc.)
 	 * is unaffected. Re-resolves the host immediately before the socket is
 	 * opened to narrow the DNS-rebinding window.
 	 *
@@ -145,18 +145,19 @@ class WP_MCP_Connect_Webhooks {
 	/**
 	 * Get the HMAC signing secret for outbound webhooks.
 	 *
-	 * Prefers AUTH_KEY (never lands in the DB). If AUTH_KEY is missing or still
-	 * the WP placeholder, generates a 32-char random secret and stores it
-	 * encrypted in wp_options. Never returns the stored secret in cleartext —
-	 * it's always decrypted just-in-time here.
+	 * A dedicated 32-char random secret, stored encrypted in wp_options and
+	 * decrypted just-in-time. AUTH_KEY is deliberately NOT used: it is never
+	 * exposed to the site owner, so receivers could never verify signatures,
+	 * and it is also key material for this plugin's own encryption, so it
+	 * must never be handed to a third-party service.
+	 *
+	 * Readable via GET /mcp/v1/webhooks/secret (manage_options) so the
+	 * receiving end can be configured; POST /mcp/v1/webhooks/secret/rotate
+	 * replaces it.
 	 *
 	 * @return string Signing secret, or '' if no secret can be established.
 	 */
 	private static function get_signing_secret() {
-		if ( defined( 'AUTH_KEY' ) && ! empty( AUTH_KEY ) && AUTH_KEY !== 'put your unique phrase here' ) {
-			return AUTH_KEY;
-		}
-
 		if ( ! class_exists( 'WP_MCP_Connect_Crypto' ) ) {
 			return '';
 		}
@@ -179,6 +180,48 @@ class WP_MCP_Connect_Webhooks {
 		update_option( 'cwp_webhook_secret', $encrypted, false );
 
 		return $plain;
+	}
+
+	/**
+	 * REST: return the current signing secret so a receiver can verify
+	 * X-CWP-Signature. Generates one if none exists yet.
+	 *
+	 * @since 1.0.5
+	 * @return WP_REST_Response|WP_Error
+	 */
+	public function get_secret_endpoint() {
+		$secret = self::get_signing_secret();
+		if ( '' === $secret ) {
+			return new WP_Error( 'no_secret', 'Unable to establish a webhook signing secret (encryption unavailable).', array( 'status' => 500 ) );
+		}
+		return rest_ensure_response( array(
+			'secret'    => $secret,
+			'algorithm' => 'hmac-sha256',
+			'header'    => 'X-CWP-Signature',
+		) );
+	}
+
+	/**
+	 * REST: rotate the signing secret. Existing receivers must be updated.
+	 *
+	 * @since 1.0.5
+	 * @return WP_REST_Response|WP_Error
+	 */
+	public function rotate_secret_endpoint() {
+		delete_option( 'cwp_webhook_secret' );
+		$secret = self::get_signing_secret();
+		if ( '' === $secret ) {
+			return new WP_Error( 'no_secret', 'Unable to generate a new webhook signing secret.', array( 'status' => 500 ) );
+		}
+		if ( class_exists( 'WP_MCP_Connect_Audit_Log' ) && method_exists( 'WP_MCP_Connect_Audit_Log', 'log' ) ) {
+			WP_MCP_Connect_Audit_Log::log( 'webhook_secret_rotated', 'Webhook signing secret rotated via REST.' );
+		}
+		return rest_ensure_response( array(
+			'secret'    => $secret,
+			'algorithm' => 'hmac-sha256',
+			'header'    => 'X-CWP-Signature',
+			'rotated'   => true,
+		) );
 	}
 
 	/**
@@ -265,14 +308,14 @@ class WP_MCP_Connect_Webhooks {
 				'methods'             => 'GET',
 				'callback'            => array( $this, 'list_webhooks' ),
 				'permission_callback' => function () {
-					return current_user_can( 'manage_options' );
+					return WP_MCP_Connect_Auth::check_capability( 'manage_options' );
 				},
 			),
 			array(
 				'methods'             => 'POST',
 				'callback'            => array( $this, 'add_webhook' ),
 				'permission_callback' => function () {
-					return current_user_can( 'manage_options' );
+					return WP_MCP_Connect_Auth::check_capability( 'manage_options' );
 				},
 				'args'                => array(
 					'url'    => array(
@@ -292,7 +335,23 @@ class WP_MCP_Connect_Webhooks {
 			'methods'             => 'DELETE',
 			'callback'            => array( $this, 'delete_webhook' ),
 			'permission_callback' => function () {
-				return current_user_can( 'manage_options' );
+				return WP_MCP_Connect_Auth::check_capability( 'manage_options' );
+			},
+		) );
+
+		register_rest_route( 'mcp/v1', '/webhooks/secret', array(
+			'methods'             => 'GET',
+			'callback'            => array( $this, 'get_secret_endpoint' ),
+			'permission_callback' => function () {
+				return WP_MCP_Connect_Auth::check_capability( 'manage_options' );
+			},
+		) );
+
+		register_rest_route( 'mcp/v1', '/webhooks/secret/rotate', array(
+			'methods'             => 'POST',
+			'callback'            => array( $this, 'rotate_secret_endpoint' ),
+			'permission_callback' => function () {
+				return WP_MCP_Connect_Auth::check_capability( 'manage_options' );
 			},
 		) );
 	}

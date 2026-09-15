@@ -33,6 +33,8 @@ foreach ( $redirect_posts as $post_id ) {
 	wp_delete_post( $post_id, true );
 }
 
+// Removes every plugin meta key, including the media index keys
+// _cwp_file_hash and _cwp_file_size.
 $wpdb->query(
 	$wpdb->prepare(
 		"DELETE FROM {$wpdb->postmeta} WHERE meta_key LIKE %s",
@@ -59,6 +61,7 @@ $cwp_tables = array(
 	'cwp_api_log',
 	'cwp_audit_log',
 	'cwp_topology',
+	// Legacy cleanup: GSC tables from pre-Lite installs.
 	'cwp_gsc_data',
 	'cwp_gsc_queries',
 	'cwp_gsc_sync_log',
@@ -72,7 +75,7 @@ foreach ( $cwp_tables as $cwp_table ) {
 
 // Remove remaining plugin options — especially anything holding secrets.
 $cwp_options = array(
-	// Google Search Console OAuth + sync state.
+	// Legacy cleanup: Google Search Console OAuth + sync state from pre-Lite installs.
 	'cwp_gsc_access_token',
 	'cwp_gsc_refresh_token',
 	'cwp_gsc_token_expiry',
@@ -112,7 +115,11 @@ $cwp_cron_hooks = array(
 	'cwp_task_refresh_event',
 	'cwp_weekly_report_event',
 	'cwp_404_cleanup_event',
-	'cwp_gsc_sync_cron',
+	'cwp_ops_prune_event',
+	'cwp_media_index_event',
+	// Legacy cleanup: GSC cron hooks from pre-Lite installs.
+	'cwp_gsc_scheduled_sync',
+	'cwp_gsc_manual_sync',
 	'cwp_evaluate_rules',
 	'cwp_refresh_tasks',
 );

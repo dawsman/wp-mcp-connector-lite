@@ -47,21 +47,31 @@ class WP_MCP_Connect_Security_Test extends WP_UnitTestCase {
 	public function test_unauthenticated_access_blocked() {
 		wp_set_current_user( 0 );
 
+		// WP_REST_Server::dispatch() validates required args *before* it calls
+		// the permission callback, so any endpoint with a required parameter
+		// must be given one here — otherwise the 400 for the missing param
+		// masks the authentication check we are actually asserting on.
 		$protected_endpoints = array(
-			array( 'GET', '/mcp/v1/seo/audit' ),
-			array( 'POST', '/mcp/v1/content/create' ),
-			array( 'GET', '/mcp/v1/settings' ),
-			array( 'POST', '/mcp/v1/settings' ),
-			array( 'GET', '/mcp/v1/gsc/auth/status' ),
+			array( 'GET', '/mcp/v1/seo/audit', array() ),
+			array( 'POST', '/mcp/v1/content/create', array( 'title' => 'Unauthenticated Post' ) ),
+			array( 'GET', '/mcp/v1/settings', array() ),
+			array( 'POST', '/mcp/v1/settings', array() ),
+			array( 'GET', '/mcp/v1/health-score/summary', array() ),
 		);
 
 		foreach ( $protected_endpoints as $endpoint ) {
-			$request  = new WP_REST_Request( $endpoint[0], $endpoint[1] );
+			list( $method, $route, $params ) = $endpoint;
+
+			$request = new WP_REST_Request( $method, $route );
+			foreach ( $params as $key => $value ) {
+				$request->set_param( $key, $value );
+			}
+
 			$response = $this->server->dispatch( $request );
 			$this->assertContains(
 				$response->get_status(),
 				array( 401, 403 ),
-				"Endpoint {$endpoint[0]} {$endpoint[1]} should require authentication"
+				"Endpoint {$method} {$route} should require authentication"
 			);
 		}
 	}
@@ -99,19 +109,20 @@ class WP_MCP_Connect_Security_Test extends WP_UnitTestCase {
 	 * Test that is_internal_url handles malformed URLs safely.
 	 */
 	public function test_malformed_url_not_treated_as_internal() {
-		$redirects = new WP_MCP_Connect_Redirects( 'wp-mcp-connect', '1.0.0' );
-
-		// Use reflection to test private method.
-		$method = new ReflectionMethod( $redirects, 'is_internal_url' );
-		$method->setAccessible( true );
-
-		// Malformed URLs should not be treated as internal.
-		$this->assertFalse( $method->invoke( $redirects, '://malformed' ) );
-		$this->assertFalse( $method->invoke( $redirects, 'https://evil.com' ) );
+		// Malformed or off-site URLs must never be treated as internal.
+		$this->assertFalse( WP_MCP_Connect_Redirects::is_internal_url( '://malformed' ) );
+		$this->assertFalse( WP_MCP_Connect_Redirects::is_internal_url( 'https://evil.com' ) );
+		$this->assertFalse( WP_MCP_Connect_Redirects::is_internal_url( 'https:evil.com' ) );
+		$this->assertFalse( WP_MCP_Connect_Redirects::is_internal_url( '//evil.com/path' ) );
+		$this->assertFalse( WP_MCP_Connect_Redirects::is_internal_url( '/\\evil.com' ) );
+		$this->assertFalse( WP_MCP_Connect_Redirects::is_internal_url( "/path\nhttps://evil.com" ) );
+		$this->assertFalse( WP_MCP_Connect_Redirects::is_internal_url( 'javascript:alert(1)' ) );
+		$this->assertFalse( WP_MCP_Connect_Redirects::is_internal_url( '' ) );
 
 		// Internal URLs should pass.
-		$this->assertTrue( $method->invoke( $redirects, '/some-page' ) );
-		$this->assertTrue( $method->invoke( $redirects, '/another/path' ) );
+		$this->assertTrue( WP_MCP_Connect_Redirects::is_internal_url( '/some-page' ) );
+		$this->assertTrue( WP_MCP_Connect_Redirects::is_internal_url( '/another/path' ) );
+		$this->assertTrue( WP_MCP_Connect_Redirects::is_internal_url( home_url( '/on-site' ) ) );
 	}
 
 	/**

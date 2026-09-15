@@ -156,7 +156,7 @@ class WP_MCP_Connect_Menus {
 	 * @return   bool
 	 */
 	public function check_permission() {
-		return current_user_can( 'edit_posts' );
+		return WP_MCP_Connect_Auth::check_capability( 'edit_posts' );
 	}
 
 	/**
@@ -166,7 +166,7 @@ class WP_MCP_Connect_Menus {
 	 * @return   bool
 	 */
 	public function check_edit_permission() {
-		return current_user_can( 'edit_theme_options' );
+		return WP_MCP_Connect_Auth::check_capability( 'edit_theme_options' );
 	}
 
 	/**

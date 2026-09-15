@@ -97,7 +97,7 @@ class WP_MCP_Connect_Redirects_IO {
 	 * @return   bool    True if user can manage options.
 	 */
 	public function check_permission() {
-		return current_user_can( 'manage_options' );
+		return WP_MCP_Connect_Auth::check_capability( 'manage_options' );
 	}
 
 	/**

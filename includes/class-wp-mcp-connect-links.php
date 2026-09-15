@@ -118,6 +118,11 @@ class WP_MCP_Connect_Links {
 					'default' => 5,
 					'maximum' => 20,
 				),
+				'post_type' => array(
+					'type'        => 'string',
+					'default'     => 'post',
+					'description' => 'Post type to scan for orphans when no post_id is given.',
+				),
 			),
 		) );
 	}
@@ -129,7 +134,7 @@ class WP_MCP_Connect_Links {
 	 * @return   bool
 	 */
 	public function check_permission() {
-		return current_user_can( 'edit_posts' );
+		return WP_MCP_Connect_Auth::check_capability( 'edit_posts' );
 	}
 
 	/**
@@ -274,18 +279,20 @@ class WP_MCP_Connect_Links {
 		}
 
 		// For orphaned content, suggest top related posts for each orphan.
-		$orphaned = $this->get_orphaned_content( $request );
-		$results = array();
-		if ( is_array( $orphaned ) && ! empty( $orphaned['posts'] ) ) {
-			foreach ( $orphaned['posts'] as $post ) {
-				$suggestions = $this->build_related_suggestions( (int) $post['post_id'], $limit );
-				$results[] = array(
-					'post_id'     => (int) $post['post_id'],
-					'post_title'  => $post['post_title'],
-					'post_url'    => $post['post_url'],
-					'suggestions' => $suggestions,
-				);
-			}
+		$post_type = sanitize_key( (string) $request->get_param( 'post_type' ) );
+		if ( '' === $post_type || ! post_type_exists( $post_type ) ) {
+			$post_type = 'post';
+		}
+
+		$orphaned = $this->find_orphaned_content( $post_type, 1, 20 );
+		$results  = array();
+		foreach ( $orphaned['posts'] as $post ) {
+			$results[] = array(
+				'post_id'     => $post['id'],
+				'post_title'  => $post['title'],
+				'post_url'    => $post['permalink'],
+				'suggestions' => $this->build_related_suggestions( $post['id'], $limit ),
+			);
 		}
 
 		return array(
@@ -356,10 +363,29 @@ class WP_MCP_Connect_Links {
 	 * @return   array
 	 */
 	public function get_orphaned_content( $request ) {
-		$post_type = $request->get_param( 'post_type' );
-		$page = max( 1, $request->get_param( 'page' ) );
-		$per_page = min( 100, max( 1, $request->get_param( 'per_page' ) ) );
+		$post_type = sanitize_key( (string) $request->get_param( 'post_type' ) );
+		if ( '' === $post_type || ! post_type_exists( $post_type ) ) {
+			return new WP_Error( 'invalid_post_type', 'Unknown post type.', array( 'status' => 400 ) );
+		}
+		$page     = max( 1, (int) $request->get_param( 'page' ) );
+		$per_page = min( 100, max( 1, (int) $request->get_param( 'per_page' ) ) );
 
+		return $this->find_orphaned_content( $post_type, $page, $per_page );
+	}
+
+	/**
+	 * Find published posts of a type with no category or tag assigned.
+	 *
+	 * Separated from the REST handler so other endpoints (link suggestions)
+	 * can call it with explicit parameters instead of a foreign request.
+	 *
+	 * @since    1.0.5
+	 * @param    string    $post_type    Post type slug (already validated).
+	 * @param    int       $page         1-based page.
+	 * @param    int       $per_page     Rows per page (1-100).
+	 * @return   array                   posts (id/title/date/edit_url/permalink), total, page, per_page, total_pages.
+	 */
+	private function find_orphaned_content( $post_type, $page, $per_page ) {
 		global $wpdb;
 
 		$tax_query_sql = '';
@@ -383,6 +409,7 @@ class WP_MCP_Connect_Links {
 			)";
 		}
 
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$count_query = $wpdb->prepare(
 			"SELECT COUNT(*) FROM {$wpdb->posts} p 
 			WHERE p.post_type = %s 
@@ -390,10 +417,14 @@ class WP_MCP_Connect_Links {
 			{$tax_query_sql}",
 			$post_type
 		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
+		// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$total = (int) $wpdb->get_var( $count_query );
+		// phpcs:enable WordPress.DB.PreparedSQL.NotPrepared
 		$offset = ( $page - 1 ) * $per_page;
 
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$posts_query = $wpdb->prepare(
 			"SELECT p.ID, p.post_title, p.post_date 
 			FROM {$wpdb->posts} p 
@@ -406,8 +437,11 @@ class WP_MCP_Connect_Links {
 			$per_page,
 			$offset
 		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
+		// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$posts = $wpdb->get_results( $posts_query );
+		// phpcs:enable WordPress.DB.PreparedSQL.NotPrepared
 		$results = array();
 
 		foreach ( $posts as $post ) {

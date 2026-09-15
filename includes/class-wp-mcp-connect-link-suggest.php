@@ -35,12 +35,14 @@ class WP_MCP_Connect_Link_Suggest {
 		// Get candidate target posts (published, public types, not self)
 		$post_types = get_post_types( array( 'public' => true ), 'names' );
 		$placeholders = implode( ',', array_fill( 0, count( $post_types ), '%s' ) );
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$candidates = $wpdb->get_results( $wpdb->prepare(
 			"SELECT ID, post_title, post_type FROM {$wpdb->posts}
 			 WHERE post_status = 'publish' AND post_type IN ({$placeholders}) AND ID != %d
 			 ORDER BY post_date DESC LIMIT 500", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQL.NotPrepared
 			...array_merge( array_values( $post_types ), array( $post_id ) )
 		) );
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
 		$suggestions = array();
 
@@ -69,22 +71,6 @@ class WP_MCP_Connect_Link_Suggest {
 				if ( false !== strpos( $content_lower, $focus_lower ) ) {
 					$match_phrases[] = $focus;
 					$best_score = max( $best_score, 90 );
-				}
-			}
-
-			// Check top GSC query match
-			$gsc_table = $wpdb->prefix . 'cwp_gsc_data';
-			if ( $wpdb->get_var( "SHOW TABLES LIKE '{$gsc_table}'" ) === $gsc_table ) { // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-				$top_query = $wpdb->get_var( $wpdb->prepare(
-					"SELECT top_query FROM {$gsc_table} WHERE post_id = %d AND top_query != '' LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-					$candidate->ID
-				) );
-				if ( $top_query && strlen( $top_query ) >= 3 ) {
-					$query_lower = strtolower( $top_query );
-					if ( false !== strpos( $content_lower, $query_lower ) ) {
-						$match_phrases[] = $top_query;
-						$best_score = max( $best_score, 70 );
-					}
 				}
 			}
 

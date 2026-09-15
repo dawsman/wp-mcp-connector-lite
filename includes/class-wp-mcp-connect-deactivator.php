@@ -32,6 +32,16 @@ class WP_MCP_Connect_Deactivator {
 		if ( $cleanup ) {
 			wp_unschedule_event( $cleanup, 'cwp_404_cleanup_event' );
 		}
+
+		$media_index = wp_next_scheduled( 'cwp_media_index_event' );
+		if ( $media_index ) {
+			wp_unschedule_event( $media_index, 'cwp_media_index_event' );
+		}
+
+		$ops_prune = wp_next_scheduled( 'cwp_ops_prune_event' );
+		if ( $ops_prune ) {
+			wp_unschedule_event( $ops_prune, 'cwp_ops_prune_event' );
+		}
 		$admin_role = get_role( 'administrator' );
 		if ( $admin_role ) {
 			$admin_role->remove_cap( 'manage_cwp_redirects' );

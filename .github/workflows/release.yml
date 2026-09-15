@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+  # A manual run enters at the `test` job too — `release` needs it, so a
+  # workflow_dispatch can never publish without a green test matrix.
   workflow_dispatch:
 
 permissions:
@@ -14,7 +16,72 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  test:
+    name: Test (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['7.4', '8.2']
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: wp_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up PHP ${{ matrix.php }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mysqli, mbstring
+          tools: composer
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      # One file per invocation: php -l only reports on its first argument
+      # under PHP 7.4, so a single multi-file call would silently skip the rest.
+      - name: Lint PHP sources
+        run: |
+          for f in wp-mcp-connect.php uninstall.php includes/*.php; do
+            php -l "$f"
+          done
+
+      - name: Install WordPress test suite
+        run: bash bin/install-wp-tests.sh wp_test root root 127.0.0.1 latest
+
+      - name: PHPUnit
+        run: vendor/bin/phpunit
+
+      # Security sniffs only — formatting noise is deliberately out of scope.
+      # A hit here fails the build; annotate provably safe code at the call
+      # site with a scoped phpcs:disable/enable pair and a reason.
+      - name: PHPCS security sniffs
+        continue-on-error: false
+        run: |
+          vendor/bin/phpcs \
+            --standard=WordPress \
+            --extensions=php \
+            --ignore=vendor,tests,node_modules \
+            --sniffs=WordPress.DB.PreparedSQL,WordPress.Security.EscapeOutput,WordPress.Security.NonceVerification,WordPress.Security.ValidatedSanitizedInput \
+            .
+
   release:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -59,7 +126,8 @@ jobs:
 
       # Sync the manifest's version/download_url/last_updated before the build.
       # build.sh requires plugin-header version and manifest version to match;
-      # this step makes that invariant hold after an auto-bump.
+      # this step makes that invariant hold after an auto-bump. The manifest is
+      # only edited here — it is not committed until the release asset exists.
       - name: Update manifest (version, download_url, last_updated)
         run: |
           VERSION="${{ steps.version.outputs.version }}"
@@ -76,16 +144,11 @@ jobs:
           chmod +x build.sh
           ./build.sh
 
-      - name: Commit manifest and tag
+      - name: Tag release
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add update-info.json
-          if ! git diff --cached --quiet; then
-            git commit -m "Update manifest for v${VERSION} [skip ci]"
-            git push origin main
-          fi
           git tag "v${VERSION}"
           git push origin "v${VERSION}"
 
@@ -96,3 +159,18 @@ jobs:
           name: v${{ steps.version.outputs.version }}
           files: wp-mcp-connect-${{ steps.version.outputs.version }}.zip
           generate_release_notes: true
+
+      # Last, on purpose. update-info.json is served raw from main and is what
+      # installed sites poll for updates, so it must not advertise a
+      # download_url until the tag and its ZIP asset actually exist —
+      # otherwise every site that polls in the gap gets a 404.
+      - name: Commit manifest
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add update-info.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Update manifest for v${VERSION} [skip ci]"
+            git push origin main
+          fi

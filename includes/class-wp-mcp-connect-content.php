@@ -34,26 +34,15 @@ class WP_MCP_Connect_Content {
 	private $version;
 
 	/**
-	 * Logger instance for API request logging.
-	 *
-	 * @since    1.0.0
-	 * @access   private
-	 * @var      WP_MCP_Connect_Logger    $logger    Logger instance.
-	 */
-	private $logger;
-
-	/**
 	 * Initialize the class and set its properties.
 	 *
 	 * @since    1.0.0
 	 * @param    string                $plugin_name    The name of the plugin.
 	 * @param    string                $version        The version of this plugin.
-	 * @param    WP_MCP_Connect_Logger $logger         Logger instance.
 	 */
-	public function __construct( $plugin_name, $version, $logger ) {
+	public function __construct( $plugin_name, $version ) {
 		$this->plugin_name = $plugin_name;
 		$this->version     = $version;
-		$this->logger      = $logger;
 	}
 
 	/**
@@ -194,7 +183,7 @@ class WP_MCP_Connect_Content {
 	 * @return   bool    True if user can edit posts.
 	 */
 	public function check_permission() {
-		return current_user_can( 'edit_posts' );
+		return WP_MCP_Connect_Auth::check_capability( 'edit_posts' );
 	}
 
 	/**
@@ -204,7 +193,7 @@ class WP_MCP_Connect_Content {
 	 * @return   bool    True if user can upload files.
 	 */
 	public function check_upload_permission() {
-		return current_user_can( 'upload_files' );
+		return WP_MCP_Connect_Auth::check_capability( 'upload_files' );
 	}
 
 	/**
@@ -306,20 +295,11 @@ class WP_MCP_Connect_Content {
 	 * @return   array|WP_Error                 Deletion result or error.
 	 */
 	public function delete_content( $request ) {
-		$start = microtime( true );
 		$id    = $request->get_param( 'id' );
 		$force = $request->get_param( 'force' );
 
 		$post = get_post( $id );
 		if ( ! $post ) {
-			$response_time = round( ( microtime( true ) - $start ) * 1000 );
-			$this->logger->log_request(
-				'/mcp/v1/content/delete',
-				'DELETE',
-				404,
-				$response_time,
-				"Post ID {$id} not found"
-			);
 			return new WP_Error(
 				'not_found',
 				__( 'Post not found.', 'wp-mcp-connect' ),
@@ -328,14 +308,6 @@ class WP_MCP_Connect_Content {
 		}
 
 		if ( ! current_user_can( 'delete_post', $id ) ) {
-			$response_time = round( ( microtime( true ) - $start ) * 1000 );
-			$this->logger->log_request(
-				'/mcp/v1/content/delete',
-				'DELETE',
-				403,
-				$response_time,
-				"Permission denied for deleting {$post->post_type} ID {$id}"
-			);
 			return new WP_Error(
 				'forbidden',
 				__( 'You do not have permission to delete this content.', 'wp-mcp-connect' ),
@@ -350,30 +322,12 @@ class WP_MCP_Connect_Content {
 		$result = wp_delete_post( $id, $force );
 
 		if ( ! $result ) {
-			$response_time = round( ( microtime( true ) - $start ) * 1000 );
-			$this->logger->log_request(
-				'/mcp/v1/content/delete',
-				'DELETE',
-				500,
-				$response_time,
-				"Failed to delete {$post_type} ID {$id}"
-			);
 			return new WP_Error(
 				'delete_failed',
 				__( 'Failed to delete content.', 'wp-mcp-connect' ),
 				array( 'status' => 500 )
 			);
 		}
-
-		$action        = $force ? 'permanently deleted' : 'trashed';
-		$response_time = round( ( microtime( true ) - $start ) * 1000 );
-		$this->logger->log_request(
-			'/mcp/v1/content/delete',
-			'DELETE',
-			200,
-			$response_time,
-			ucfirst( $post_type ) . " '{$title}' (ID: {$id}) {$action}"
-		);
 
 		return rest_ensure_response(
 			array(

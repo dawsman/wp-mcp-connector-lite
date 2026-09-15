@@ -7,10 +7,12 @@
 
 class WP_MCP_Connect_Tasks_Test extends WP_UnitTestCase {
 
+    protected static $admin_id;
     protected static $editor_id;
     protected $server;
 
     public static function wpSetUpBeforeClass( $factory ) {
+        self::$admin_id  = $factory->user->create( array( 'role' => 'administrator' ) );
         self::$editor_id = $factory->user->create( array( 'role' => 'editor' ) );
     }
 
@@ -36,7 +38,7 @@ class WP_MCP_Connect_Tasks_Test extends WP_UnitTestCase {
     }
 
     public function test_create_and_list_task() {
-        wp_set_current_user( self::$editor_id );
+        wp_set_current_user( self::$admin_id );
 
         $request = new WP_REST_Request( 'POST', '/mcp/v1/tasks' );
         $request->set_param( 'type', 'seo_missing' );
@@ -51,5 +53,39 @@ class WP_MCP_Connect_Tasks_Test extends WP_UnitTestCase {
         $this->assertEquals( 200, $list_response->get_status() );
         $data = $list_response->get_data();
         $this->assertArrayHasKey( 'tasks', $data );
+    }
+
+    /**
+     * Task writes affect tasks owned by every user, so since 1.0.1 they are
+     * restricted to manage_options. Reads stay open to editors.
+     */
+    public function test_editor_cannot_create_task() {
+        wp_set_current_user( self::$editor_id );
+
+        $request = new WP_REST_Request( 'POST', '/mcp/v1/tasks' );
+        $request->set_param( 'type', 'seo_missing' );
+        $request->set_param( 'title', 'Editor Task' );
+        $response = $this->server->dispatch( $request );
+
+        $this->assertEquals( 403, $response->get_status() );
+    }
+
+    public function test_editor_can_list_tasks() {
+        wp_set_current_user( self::$editor_id );
+
+        $request = new WP_REST_Request( 'GET', '/mcp/v1/tasks' );
+        $response = $this->server->dispatch( $request );
+
+        $this->assertEquals( 200, $response->get_status() );
+        $this->assertArrayHasKey( 'tasks', $response->get_data() );
+    }
+
+    public function test_editor_cannot_refresh_tasks() {
+        wp_set_current_user( self::$editor_id );
+
+        $request = new WP_REST_Request( 'POST', '/mcp/v1/tasks/refresh' );
+        $response = $this->server->dispatch( $request );
+
+        $this->assertEquals( 403, $response->get_status() );
     }
 }

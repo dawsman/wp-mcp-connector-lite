@@ -33,25 +33,15 @@ class WP_MCP_Connect_Tasks {
 	private $version;
 
 	/**
-	 * Logger instance.
-	 *
-	 * @since 1.0.0
-	 * @var WP_MCP_Connect_Logger|null
-	 */
-	private $logger;
-
-	/**
 	 * Initialize the class.
 	 *
 	 * @since 1.0.0
 	 * @param string                      $plugin_name Plugin name.
 	 * @param string                      $version     Plugin version.
-	 * @param WP_MCP_Connect_Logger|null  $logger      Logger.
 	 */
-	public function __construct( $plugin_name, $version, $logger = null ) {
+	public function __construct( $plugin_name, $version ) {
 		$this->plugin_name = $plugin_name;
 		$this->version     = $version;
-		$this->logger      = $logger;
 	}
 
 	/**
@@ -166,7 +156,7 @@ class WP_MCP_Connect_Tasks {
 	 * @return bool
 	 */
 	public function check_permission() {
-		return current_user_can( 'edit_posts' );
+		return WP_MCP_Connect_Auth::check_capability( 'edit_posts' );
 	}
 
 	/**
@@ -179,7 +169,7 @@ class WP_MCP_Connect_Tasks {
 	 * @return bool
 	 */
 	public function check_write_permission() {
-		return current_user_can( 'manage_options' );
+		return WP_MCP_Connect_Auth::check_capability( 'manage_options' );
 	}
 
 	/**
@@ -613,7 +603,7 @@ class WP_MCP_Connect_Tasks {
 		if ( ! class_exists( 'WP_MCP_Connect_SEO_Bulk' ) ) {
 			return 0;
 		}
-		$seo_bulk = new WP_MCP_Connect_SEO_Bulk( $this->plugin_name, $this->version, $this->logger );
+		$seo_bulk = new WP_MCP_Connect_SEO_Bulk( $this->plugin_name, $this->version );
 		$request = new WP_REST_Request();
 		$request->set_param( 'post_type', 'any' );
 		$request->set_param( 'page', 1 );

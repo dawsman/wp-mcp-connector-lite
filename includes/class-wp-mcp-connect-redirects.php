@@ -156,20 +156,46 @@ class WP_MCP_Connect_Redirects {
 	 * @return   bool              True if internal, false if external.
 	 */
 	public static function is_internal_url( $url ) {
-		// Allow relative paths.
-		if ( strpos( $url, '/' ) === 0 && strpos( $url, '//' ) !== 0 ) {
-			return true;
+		$url = trim( (string) $url );
+
+		if ( '' === $url ) {
+			return false;
+		}
+
+		// Backslashes are normalised to forward slashes by several browsers,
+		// so "/\\evil.com" would leave the site despite looking relative.
+		if ( false !== strpos( $url, '\\' ) ) {
+			return false;
+		}
+
+		// Control characters (including encoded newlines/tabs) are stripped by
+		// browsers before the URL is resolved, so they can hide a host.
+		if ( preg_match( '/[\x00-\x1F\x7F]/', $url ) ) {
+			return false;
+		}
+
+		// Site-relative paths are internal, but protocol-relative ones
+		// ("//evil.com") are not.
+		if ( '/' === $url[0] ) {
+			return 0 !== strpos( $url, '//' );
 		}
 
 		$parsed = wp_parse_url( $url );
-		if ( false === $parsed ) {
+
+		// Anything that is not a plain relative path must parse to an absolute
+		// http(s) URL on this host. A missing host is NOT treated as internal:
+		// malformed input such as "://evil.com" or "https:evil.com" parses to a
+		// bare path and would otherwise sail through this check.
+		if ( ! is_array( $parsed ) || empty( $parsed['host'] ) || empty( $parsed['scheme'] ) ) {
 			return false;
 		}
-		if ( empty( $parsed['host'] ) ) {
-			return true;
+
+		if ( ! in_array( strtolower( $parsed['scheme'] ), array( 'http', 'https' ), true ) ) {
+			return false;
 		}
 
 		$site_host = wp_parse_url( home_url(), PHP_URL_HOST );
+
 		return strtolower( $parsed['host'] ) === strtolower( $site_host );
 	}
 
@@ -307,6 +333,24 @@ class WP_MCP_Connect_Redirects {
 	}
 
 	/**
+	 * Schedule a cache rebuild when a redirect is deleted, trashed or restored.
+	 *
+	 * Hooked to before_delete_post / trashed_post / untrashed_post, which fire
+	 * for every post type, so the post type is checked here. Without this the
+	 * serving cache only refreshed on save, and a deleted redirect kept firing.
+	 *
+	 * @since    1.0.5
+	 * @param    int    $post_id    Post ID.
+	 * @return   void
+	 */
+	public function maybe_schedule_cache_rebuild( $post_id ) {
+		if ( 'cwp_redirect' !== get_post_type( $post_id ) ) {
+			return;
+		}
+		$this->schedule_cache_rebuild( $post_id );
+	}
+
+	/**
 	 * Perform the redirect if current path matches a rule.
 	 *
 	 * @since    1.0.0
@@ -330,7 +374,7 @@ class WP_MCP_Connect_Redirects {
 		}
 
 		$request_uri = isset( $_SERVER['REQUEST_URI'] )
-			? wp_unslash( $_SERVER['REQUEST_URI'] )
+			? sanitize_text_field( wp_unslash( $_SERVER['REQUEST_URI'] ) )
 			: '';
 		
 		if ( empty( $request_uri ) ) {

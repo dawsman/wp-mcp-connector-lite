@@ -4,9 +4,9 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Security audit log for WP MCP Connect.
  *
- * Logs security-sensitive mutations: settings changes, redirect CRUD,
- * GSC connect/disconnect. Each entry captures timestamp, user_id,
- * action_type, details, and IP address.
+ * Logs security-sensitive mutations: settings changes and redirect CRUD.
+ * Each entry captures timestamp, user_id, action_type, details,
+ * and IP address.
  *
  * @since      1.0.0
  * @package    WP_MCP_Connect
@@ -95,7 +95,9 @@ class WP_MCP_Connect_Audit_Log {
 		global $wpdb;
 		$table = self::table_name();
 
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		if ( $wpdb->get_var( "SHOW TABLES LIKE '{$table}'" ) !== $table ) {
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 			return;
 		}
 
@@ -152,19 +154,25 @@ class WP_MCP_Connect_Audit_Log {
 		$params[] = $limit;
 		$params[] = $offset;
 
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$results = $wpdb->get_results( $wpdb->prepare(
 			"SELECT * FROM {$table} WHERE {$where} ORDER BY created_at DESC LIMIT %d OFFSET %d",
 			...$params
 		), ARRAY_A );
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
 		$count_params = array_slice( $params, 0, -2 );
 		if ( ! empty( $count_params ) ) {
+			// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 			$total = (int) $wpdb->get_var( $wpdb->prepare(
 				"SELECT COUNT(*) FROM {$table} WHERE {$where}",
 				...$count_params
 			) );
+			// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		} else {
+			// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 			$total = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE {$where}" );
+			// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		}
 
 		return array(
@@ -201,7 +209,7 @@ class WP_MCP_Connect_Audit_Log {
 			'methods'             => 'GET',
 			'callback'            => array( $this, 'rest_get_entries' ),
 			'permission_callback' => function() {
-				return current_user_can( 'manage_options' );
+				return WP_MCP_Connect_Auth::check_capability( 'manage_options' );
 			},
 			'args'                => array(
 				'page'     => array( 'type' => 'integer', 'default' => 1 ),

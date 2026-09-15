@@ -5,7 +5,7 @@ defined( 'ABSPATH' ) || exit;
  * Content Health Score utility class.
  *
  * Calculates a composite 0-100 health score for posts based on
- * SEO completeness, content freshness, internal linking, and GSC performance.
+ * SEO completeness, content freshness, and internal linking.
  *
  * @since      1.0.0
  * @package    WP_MCP_Connect
@@ -32,10 +32,9 @@ class WP_MCP_Connect_Health_Score {
 	 * @var array<string, float>
 	 */
 	private static $component_weights = array(
-		'seo'       => 0.30,
-		'freshness' => 0.20,
-		'linking'   => 0.20,
-		'gsc'       => 0.30,
+		'seo'       => 0.4286,
+		'freshness' => 0.2857,
+		'linking'   => 0.2857,
 	);
 
 	/**
@@ -54,13 +53,11 @@ class WP_MCP_Connect_Health_Score {
 		$seo_score       = self::calculate_seo_completeness( $post_id );
 		$freshness_score = self::calculate_freshness( $post );
 		$linking_score   = self::calculate_linking( $post_id );
-		$gsc_score       = self::calculate_gsc_performance( $post_id );
 
 		$composite = (int) round(
 			$seo_score       * self::$component_weights['seo']
 			+ $freshness_score * self::$component_weights['freshness']
 			+ $linking_score   * self::$component_weights['linking']
-			+ $gsc_score       * self::$component_weights['gsc']
 		);
 
 		$composite = max( 0, min( 100, $composite ) );
@@ -69,7 +66,6 @@ class WP_MCP_Connect_Health_Score {
 			'seo'       => $seo_score,
 			'freshness' => $freshness_score,
 			'linking'   => $linking_score,
-			'gsc'       => $gsc_score,
 		);
 
 		$status = self::score_to_status( $composite );
@@ -285,75 +281,5 @@ class WP_MCP_Connect_Health_Score {
 		}
 
 		return $inlink_score + $outlink_score;
-	}
-
-	/**
-	 * Calculate GSC performance score (0-100).
-	 *
-	 * @since    1.0.0
-	 * @access   private
-	 * @param    int    $post_id    The post ID.
-	 * @return   int                GSC performance score.
-	 */
-	private static function calculate_gsc_performance( $post_id ) {
-		global $wpdb;
-
-		$table = $wpdb->prefix . 'cwp_gsc_data';
-
-		// Check if the table exists.
-		$table_exists = $wpdb->get_var(
-			$wpdb->prepare( 'SHOW TABLES LIKE %s', $table )
-		);
-
-		if ( ! $table_exists ) {
-			return 50;
-		}
-
-		$post_url = get_permalink( $post_id );
-		if ( ! $post_url ) {
-			return 50;
-		}
-
-		$row = $wpdb->get_row(
-			$wpdb->prepare(
-				"SELECT avg_position, click_trend, prev_position FROM {$table} WHERE post_id = %d OR url = %s LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-				$post_id,
-				$post_url
-			)
-		);
-
-		if ( ! $row ) {
-			return 50;
-		}
-
-		$score = 50;
-
-		// Click trend adjustment.
-		if ( isset( $row->click_trend ) ) {
-			$trend = strtolower( $row->click_trend );
-			if ( 'improving' === $trend || 'up' === $trend ) {
-				$score += 25;
-			} elseif ( 'stable' === $trend ) {
-				$score += 10;
-			} elseif ( 'declining' === $trend || 'down' === $trend ) {
-				$score -= 10;
-			}
-		}
-
-		// Position adjustment.
-		if ( isset( $row->avg_position ) ) {
-			$position = (float) $row->avg_position;
-			if ( $position <= 3 ) {
-				$score += 25;
-			} elseif ( $position <= 10 ) {
-				$score += 15;
-			} elseif ( $position <= 20 ) {
-				$score += 5;
-			} else {
-				$score -= 5;
-			}
-		}
-
-		return max( 0, min( 100, $score ) );
 	}
 }

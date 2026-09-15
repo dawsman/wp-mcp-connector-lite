@@ -3,53 +3,6 @@ defined( 'ABSPATH' ) || exit;
 
 class WP_MCP_Connect_Admin_Lite {
 
-	public function maybe_handle_gsc_callback() {
-		if ( ! isset( $_GET['page'], $_GET['gsc_callback'] ) )                          return;
-		if ( 'wp-mcp-connect' !== sanitize_key( wp_unslash( $_GET['page'] ) ) )         return;
-		if ( ! current_user_can( 'manage_options' ) )                                   return;
-		if ( ! class_exists( 'WP_MCP_Connect_GSC_Auth' ) )                              return;
-
-		$auth    = new WP_MCP_Connect_GSC_Auth( 'wp-mcp-connect', WP_MCP_CONNECT_VERSION );
-		$request = new WP_REST_Request( 'GET', '/mcp/v1/gsc/auth/callback' );
-		$request->set_param( 'code',  isset( $_GET['code'] )  ? sanitize_text_field( wp_unslash( $_GET['code']  ) ) : '' );
-		$request->set_param( 'state', isset( $_GET['state'] ) ? sanitize_text_field( wp_unslash( $_GET['state'] ) ) : '' );
-
-		$result = $auth->handle_callback( $request );
-		$status = is_wp_error( $result ) ? 'error' : 'connected';
-		$msg    = is_wp_error( $result ) ? $result->get_error_message() : '';
-
-		set_transient( 'cwp_gsc_admin_notice_' . get_current_user_id(),
-			array( 'status' => $status, 'message' => $msg ), 60 );
-
-		wp_safe_redirect( admin_url( 'admin.php?page=wp-mcp-connect&gsc=' . $status ) );
-		exit;
-	}
-
-	public function handle_gsc_connect() {
-		check_admin_referer( 'cwp_gsc_connect' );
-		if ( ! current_user_can( 'manage_options' ) )      wp_die( 'Forbidden' );
-		if ( ! class_exists( 'WP_MCP_Connect_GSC_Auth' ) ) wp_die( 'GSC class missing' );
-
-		$auth   = new WP_MCP_Connect_GSC_Auth( 'wp-mcp-connect', WP_MCP_CONNECT_VERSION );
-		$result = $auth->get_auth_url();
-		if ( is_wp_error( $result ) ) wp_die( esc_html( $result->get_error_message() ) );
-
-		$data = $result->get_data();
-		wp_redirect( $data['url'] );
-		exit;
-	}
-
-	public function handle_gsc_disconnect() {
-		check_admin_referer( 'cwp_gsc_disconnect' );
-		if ( ! current_user_can( 'manage_options' ) )      wp_die( 'Forbidden' );
-		if ( ! class_exists( 'WP_MCP_Connect_GSC_Auth' ) ) wp_die( 'GSC class missing' );
-
-		$auth = new WP_MCP_Connect_GSC_Auth( 'wp-mcp-connect', WP_MCP_CONNECT_VERSION );
-		$auth->disconnect();
-		wp_safe_redirect( admin_url( 'admin.php?page=wp-mcp-connect&gsc=disconnected' ) );
-		exit;
-	}
-
 	public function register_admin_menu() {
 		add_menu_page(
 			__( 'MCP Connect Lite', 'wp-mcp-connect' ),
@@ -67,6 +20,10 @@ class WP_MCP_Connect_Admin_Lite {
 		$connected   = ! empty( $last_access['timestamp'] );
 		$recent      = $connected && ( time() - $last_access['timestamp'] ) < 86400;
 
+		// Read-only pagination on an admin screen already gated by
+		// manage_options; there is no state change to protect with a nonce and
+		// the value is cast to a positive integer before use.
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
 		$page = isset( $_GET['paged'] ) ? max( 1, (int) $_GET['paged'] ) : 1;
 		$per_page = 20;
 		$ops = $this->get_ops_log( $per_page, ( $page - 1 ) * $per_page );
@@ -76,75 +33,6 @@ class WP_MCP_Connect_Admin_Lite {
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'MCP Connect Lite', 'wp-mcp-connect' ); ?></h1>
-
-			<?php
-			$gsc_connected = false;
-			$gsc_has_creds = false;
-			$gsc_site      = '';
-			if ( class_exists( 'WP_MCP_Connect_GSC_Auth' ) ) {
-				$gsc_auth     = new WP_MCP_Connect_GSC_Auth( 'wp-mcp-connect', WP_MCP_CONNECT_VERSION );
-				$gsc_response = $gsc_auth->get_status();
-				$gsc_data     = ( $gsc_response instanceof WP_REST_Response ) ? $gsc_response->get_data() : array();
-				if ( ! is_array( $gsc_data ) ) {
-					$gsc_data = array();
-				}
-				$gsc_connected = ! empty( $gsc_data['is_connected'] );
-				$gsc_has_creds = ! empty( $gsc_data['has_credentials'] );
-				$gsc_site      = $gsc_data['site_url'] ?? '';
-			}
-			$gsc_notice_key = 'cwp_gsc_admin_notice_' . get_current_user_id();
-			$gsc_notice     = get_transient( $gsc_notice_key );
-			if ( $gsc_notice ) delete_transient( $gsc_notice_key );
-			?>
-			<div class="cwp-status-card" style="background:#fff;border:1px solid #c3c4c7;border-left:4px solid <?php echo $gsc_connected ? '#00a32a' : '#dba617'; ?>;padding:16px 20px;margin:20px 0;max-width:700px;">
-				<h2 style="margin:0 0 8px;font-size:15px;">
-					<?php esc_html_e( 'Google Search Console', 'wp-mcp-connect' ); ?> &mdash;
-					<?php
-					if ( $gsc_connected ) {
-						esc_html_e( 'Connected', 'wp-mcp-connect' );
-					} elseif ( $gsc_has_creds ) {
-						esc_html_e( 'Not connected', 'wp-mcp-connect' );
-					} else {
-						esc_html_e( 'Credentials missing', 'wp-mcp-connect' );
-					}
-					?>
-				</h2>
-
-				<?php if ( $gsc_notice && 'error' === $gsc_notice['status'] ) : ?>
-					<div class="notice notice-error inline" style="margin:8px 0;"><p><?php echo esc_html( $gsc_notice['message'] ); ?></p></div>
-				<?php elseif ( $gsc_notice && 'connected' === $gsc_notice['status'] ) : ?>
-					<div class="notice notice-success inline" style="margin:8px 0;"><p><?php esc_html_e( 'Successfully connected.', 'wp-mcp-connect' ); ?></p></div>
-				<?php endif; ?>
-
-				<?php if ( ! $gsc_has_creds ) : ?>
-					<p class="description" style="margin:0;">
-						<?php
-						printf(
-							/* translators: 1: CWP_GSC_CLIENT_ID constant, 2: CWP_GSC_CLIENT_SECRET constant, 3: wp-config.php filename */
-							esc_html__( 'Add %1$s and %2$s to %3$s.', 'wp-mcp-connect' ),
-							'<code>CWP_GSC_CLIENT_ID</code>',
-							'<code>CWP_GSC_CLIENT_SECRET</code>',
-							'<code>wp-config.php</code>'
-						);
-						?>
-					</p>
-				<?php elseif ( $gsc_connected ) : ?>
-					<?php if ( $gsc_site ) : ?>
-						<p class="description" style="margin:0 0 8px;"><?php esc_html_e( 'Site:', 'wp-mcp-connect' ); ?> <code><?php echo esc_html( $gsc_site ); ?></code></p>
-					<?php endif; ?>
-					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline;">
-						<input type="hidden" name="action" value="cwp_gsc_disconnect">
-						<?php wp_nonce_field( 'cwp_gsc_disconnect' ); ?>
-						<button class="button"><?php esc_html_e( 'Disconnect', 'wp-mcp-connect' ); ?></button>
-					</form>
-				<?php else : ?>
-					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline;">
-						<input type="hidden" name="action" value="cwp_gsc_connect">
-						<?php wp_nonce_field( 'cwp_gsc_connect' ); ?>
-						<button class="button button-primary"><?php esc_html_e( 'Connect to Google Search Console', 'wp-mcp-connect' ); ?></button>
-					</form>
-				<?php endif; ?>
-			</div>
 
 			<div class="cwp-status-card" style="background:#fff;border:1px solid #c3c4c7;border-left:4px solid <?php echo $recent ? '#00a32a' : ( $connected ? '#dba617' : '#d63638' ); ?>;padding:16px 20px;margin:20px 0;max-width:700px;">
 				<h2 style="margin:0 0 8px;font-size:15px;">
@@ -214,14 +102,16 @@ class WP_MCP_Connect_Admin_Lite {
 					<div class="tablenav bottom" style="max-width:900px;">
 						<div class="tablenav-pages">
 							<?php
-							echo paginate_links( array(
+							// paginate_links() returns markup, so escape it as post
+							// content rather than plain text.
+							echo wp_kses_post( paginate_links( array(
 								'base'      => add_query_arg( 'paged', '%#%' ),
 								'format'    => '',
 								'current'   => $page,
 								'total'     => $total_pages,
 								'prev_text' => '&laquo;',
 								'next_text' => '&raquo;',
-							) );
+							) ) );
 							?>
 						</div>
 					</div>
@@ -239,11 +129,13 @@ class WP_MCP_Connect_Admin_Lite {
 			return array();
 		}
 
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		return $wpdb->get_results( $wpdb->prepare(
 			"SELECT op_type, payload, status, created_at FROM `{$table}` ORDER BY created_at DESC LIMIT %d OFFSET %d",
 			$limit,
 			$offset
 		) );
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 	}
 
 	private function get_ops_count() {

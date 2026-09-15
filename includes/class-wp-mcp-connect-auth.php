@@ -40,7 +40,25 @@ class WP_MCP_Connect_Auth {
 	 * @return   bool|WP_Error    True if permitted, WP_Error on rate limit or IP blocked.
 	 */
 	public static function check_admin_permission() {
-		if ( ! current_user_can( 'manage_options' ) ) {
+		return self::check_capability( 'manage_options' );
+	}
+
+	/**
+	 * Shared REST permission check: capability, then IP allow/block list,
+	 * then rate limit.
+	 *
+	 * Every mcp/v1 permission_callback must go through this so the IP
+	 * filtering and rate limiting configured in settings apply uniformly.
+	 * A bare current_user_can() silently bypasses both.
+	 *
+	 * @since    1.0.5
+	 * @param    string    $capability    WordPress capability required.
+	 * @return   bool|WP_Error            True if permitted, false if the
+	 *                                    capability is missing, WP_Error on
+	 *                                    IP block or rate limit.
+	 */
+	public static function check_capability( $capability ) {
+		if ( ! current_user_can( $capability ) ) {
 			return false;
 		}
 

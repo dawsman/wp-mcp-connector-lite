@@ -193,6 +193,191 @@ class WP_MCP_Connect_Media_Test extends WP_UnitTestCase {
         $this->assertContains( $attachment_id, $ids );
     }
 
+    protected function create_uploaded_attachment( $title = 'Uploaded Image' ) {
+        $attachment_id = $this->factory->attachment->create_upload_object(
+            dirname( __FILE__ ) . '/data/test-image.jpg'
+        );
+
+        wp_update_post( array(
+            'ID'         => $attachment_id,
+            'post_title' => $title,
+        ) );
+
+        return $attachment_id;
+    }
+
+    public function test_oversized_endpoint_registered() {
+        $routes = $this->server->get_routes();
+        $this->assertArrayHasKey( '/mcp/v1/media/oversized', $routes );
+    }
+
+    public function test_index_status_endpoint_registered() {
+        $routes = $this->server->get_routes();
+        $this->assertArrayHasKey( '/mcp/v1/media/index-status', $routes );
+        $this->assertArrayHasKey( '/mcp/v1/media/index-run', $routes );
+    }
+
+    public function test_index_attachment_records_hash_and_size() {
+        $attachment_id = $this->create_uploaded_attachment();
+        $file = get_attached_file( $attachment_id );
+
+        $this->assertNotEmpty( $file );
+        $this->assertFileExists( $file );
+
+        $media_extended = new WP_MCP_Connect_Media_Extended( 'wp-mcp-connect', '1.0.0' );
+        $media_extended->index_attachment( $attachment_id );
+
+        $hash = get_post_meta( $attachment_id, '_cwp_file_hash', true );
+        $size = get_post_meta( $attachment_id, '_cwp_file_size', true );
+
+        $this->assertEquals( md5_file( $file ), $hash );
+        $this->assertEquals( filesize( $file ), (int) $size );
+    }
+
+    public function test_index_attachment_skips_non_images() {
+        $pdf_attachment = $this->factory->attachment->create( array(
+            'post_mime_type' => 'application/pdf',
+            'post_title'     => 'PDF File',
+            'post_status'    => 'inherit',
+        ) );
+
+        $media_extended = new WP_MCP_Connect_Media_Extended( 'wp-mcp-connect', '1.0.0' );
+        $media_extended->index_attachment( $pdf_attachment );
+
+        $this->assertFalse( metadata_exists( 'post', $pdf_attachment, '_cwp_file_hash' ) );
+        $this->assertFalse( metadata_exists( 'post', $pdf_attachment, '_cwp_file_size' ) );
+    }
+
+    public function test_index_attachment_removes_meta_when_file_missing() {
+        $attachment_id = $this->create_uploaded_attachment();
+        $file = get_attached_file( $attachment_id );
+
+        $media_extended = new WP_MCP_Connect_Media_Extended( 'wp-mcp-connect', '1.0.0' );
+        $media_extended->index_attachment( $attachment_id );
+        $this->assertNotEmpty( get_post_meta( $attachment_id, '_cwp_file_hash', true ) );
+
+        unlink( $file );
+        $media_extended->index_attachment( $attachment_id );
+
+        $this->assertFalse( metadata_exists( 'post', $attachment_id, '_cwp_file_hash' ) );
+        $this->assertFalse( metadata_exists( 'post', $attachment_id, '_cwp_file_size' ) );
+    }
+
+    public function test_duplicates_groups_identical_files() {
+        $first = $this->create_uploaded_attachment( 'Duplicate One' );
+        $second = $this->create_uploaded_attachment( 'Duplicate Two' );
+
+        $media_extended = new WP_MCP_Connect_Media_Extended( 'wp-mcp-connect', '1.0.0' );
+        $media_extended->index_attachment( $first );
+        $media_extended->index_attachment( $second );
+
+        $this->assertEquals(
+            get_post_meta( $first, '_cwp_file_hash', true ),
+            get_post_meta( $second, '_cwp_file_hash', true )
+        );
+
+        $request = new WP_REST_Request( 'GET', '/mcp/v1/media/duplicates' );
+        $response = $this->server->dispatch( $request );
+
+        $this->assertEquals( 200, $response->get_status() );
+
+        $data = $response->get_data();
+        $this->assertArrayHasKey( 'duplicate_groups', $data );
+        $this->assertArrayHasKey( 'index_complete', $data );
+        $this->assertArrayHasKey( 'unindexed', $data );
+        $this->assertEquals( 1, $data['total'] );
+        $this->assertCount( 1, $data['duplicate_groups'] );
+
+        $group = $data['duplicate_groups'][0];
+        $this->assertEquals( 2, $group['count'] );
+
+        $ids = array_column( $group['images'], 'id' );
+        $this->assertContains( $first, $ids );
+        $this->assertContains( $second, $ids );
+    }
+
+    public function test_duplicates_ignores_unique_files() {
+        $attachment_id = $this->create_uploaded_attachment( 'Unique Image' );
+
+        $media_extended = new WP_MCP_Connect_Media_Extended( 'wp-mcp-connect', '1.0.0' );
+        $media_extended->index_attachment( $attachment_id );
+
+        $request = new WP_REST_Request( 'GET', '/mcp/v1/media/duplicates' );
+        $response = $this->server->dispatch( $request );
+
+        $data = $response->get_data();
+        $this->assertEquals( 0, $data['total'] );
+        $this->assertSame( array(), $data['duplicate_groups'] );
+    }
+
+    public function test_oversized_uses_size_index() {
+        $attachment_id = $this->create_uploaded_attachment( 'Sized Image' );
+
+        $media_extended = new WP_MCP_Connect_Media_Extended( 'wp-mcp-connect', '1.0.0' );
+        $media_extended->index_attachment( $attachment_id );
+
+        $size = (int) get_post_meta( $attachment_id, '_cwp_file_size', true );
+        $this->assertGreaterThan( 0, $size );
+
+        $request = new WP_REST_Request( 'GET', '/mcp/v1/media/oversized' );
+        $request->set_param( 'threshold', $size );
+        $response = $this->server->dispatch( $request );
+
+        $this->assertEquals( 200, $response->get_status() );
+
+        $data = $response->get_data();
+        $ids = array_column( $data['images'], 'id' );
+        $this->assertContains( $attachment_id, $ids );
+        $this->assertGreaterThanOrEqual( 1, $data['total'] );
+
+        $request_above = new WP_REST_Request( 'GET', '/mcp/v1/media/oversized' );
+        $request_above->set_param( 'threshold', $size + 1 );
+        $response_above = $this->server->dispatch( $request_above );
+
+        $ids_above = array_column( $response_above->get_data()['images'], 'id' );
+        $this->assertNotContains( $attachment_id, $ids_above );
+    }
+
+    public function test_index_status_reports_progress() {
+        $attachment_id = $this->create_uploaded_attachment( 'Status Image' );
+        delete_post_meta( $attachment_id, '_cwp_file_hash' );
+
+        $request = new WP_REST_Request( 'GET', '/mcp/v1/media/index-status' );
+        $response = $this->server->dispatch( $request );
+
+        $this->assertEquals( 200, $response->get_status() );
+
+        $data = $response->get_data();
+        $this->assertArrayHasKey( 'total_images', $data );
+        $this->assertArrayHasKey( 'indexed', $data );
+        $this->assertArrayHasKey( 'unindexed', $data );
+        $this->assertArrayHasKey( 'index_complete', $data );
+        $this->assertGreaterThanOrEqual( 1, $data['unindexed'] );
+        $this->assertFalse( $data['index_complete'] );
+    }
+
+    public function test_index_run_requires_manage_options() {
+        wp_set_current_user( self::$editor_id );
+
+        $request = new WP_REST_Request( 'POST', '/mcp/v1/media/index-run' );
+        $response = $this->server->dispatch( $request );
+
+        $this->assertEquals( 403, $response->get_status() );
+    }
+
+    public function test_index_batch_backfills_existing_attachments() {
+        $attachment_id = $this->create_uploaded_attachment( 'Backfill Image' );
+        delete_post_meta( $attachment_id, '_cwp_file_hash' );
+        delete_post_meta( $attachment_id, '_cwp_file_size' );
+
+        $media_extended = new WP_MCP_Connect_Media_Extended( 'wp-mcp-connect', '1.0.0' );
+        $processed = $media_extended->run_index_batch();
+
+        $this->assertGreaterThanOrEqual( 1, $processed );
+        $this->assertNotEmpty( get_post_meta( $attachment_id, '_cwp_file_hash', true ) );
+        $this->assertGreaterThan( 0, (int) get_post_meta( $attachment_id, '_cwp_file_size', true ) );
+    }
+
     public function test_only_images_returned() {
         $pdf_attachment = $this->factory->attachment->create( array(
             'post_mime_type' => 'application/pdf',

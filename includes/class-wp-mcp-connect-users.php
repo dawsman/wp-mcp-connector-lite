@@ -119,7 +119,7 @@ class WP_MCP_Connect_Users {
 	 * @return   bool
 	 */
 	public function check_permission() {
-		return current_user_can( 'edit_posts' );
+		return WP_MCP_Connect_Auth::check_capability( 'edit_posts' );
 	}
 
 	/**
@@ -129,7 +129,7 @@ class WP_MCP_Connect_Users {
 	 * @return   bool
 	 */
 	public function check_moderate_permission() {
-		return current_user_can( 'moderate_comments' );
+		return WP_MCP_Connect_Auth::check_capability( 'moderate_comments' );
 	}
 
 	/**

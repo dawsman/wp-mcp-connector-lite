@@ -15,6 +15,7 @@
     },
     "scripts": {
         "test": "phpunit",
+        "test:local": "bash bin/test-local.sh",
         "test:coverage": "phpunit --coverage-html coverage",
         "phpcs": "phpcs",
         "phpcbf": "phpcbf"

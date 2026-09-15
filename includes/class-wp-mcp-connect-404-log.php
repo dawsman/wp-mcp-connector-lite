@@ -164,7 +164,7 @@ class WP_MCP_Connect_404_Log {
 	 * @return bool
 	 */
 	public function check_permission() {
-		return current_user_can( 'manage_options' );
+		return WP_MCP_Connect_Auth::check_capability( 'manage_options' );
 	}
 
 	/**
@@ -192,9 +192,11 @@ class WP_MCP_Connect_404_Log {
 		global $wpdb;
 		$table = $wpdb->prefix . self::TABLE_NAME;
 
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$existing = $wpdb->get_row(
 			$wpdb->prepare( "SELECT id, hits FROM {$table} WHERE url_hash = %s", $url_hash )
 		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
 		$now = current_time( 'mysql', 1 );
 
@@ -241,18 +243,24 @@ class WP_MCP_Connect_404_Log {
 
 		// Remove older than 90 days.
 		$cutoff = gmdate( 'Y-m-d H:i:s', strtotime( '-90 days' ) );
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE last_seen < %s", $cutoff ) );
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
 		// Cap table size to 5000 rows.
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$count = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table}" );
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		if ( $count > 5000 ) {
 			$to_delete = $count - 5000;
+			// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 			$wpdb->query(
 				$wpdb->prepare(
 					"DELETE FROM {$table} ORDER BY last_seen ASC LIMIT %d",
 					$to_delete
 				)
 			);
+			// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		}
 	}
 
@@ -290,10 +298,14 @@ class WP_MCP_Connect_404_Log {
 		$params[] = $per_page;
 		$params[] = $offset;
 
+		// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$rows = $wpdb->get_results( $wpdb->prepare( $sql, $params ), ARRAY_A );
+		// phpcs:enable WordPress.DB.PreparedSQL.NotPrepared
 		$count_params = array_slice( $params, 0, count( $params ) - 2 );
 		if ( ! empty( $count_params ) ) {
+			// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 			$total = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} {$where}", $count_params ) );
+			// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		} else {
 			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is controlled.
 			$total = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} {$where}" );
@@ -354,7 +366,9 @@ class WP_MCP_Connect_404_Log {
 
 		global $wpdb;
 		$table = $wpdb->prefix . self::TABLE_NAME;
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$entry = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE id = %d", $id ), ARRAY_A );
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
 		if ( ! $entry ) {
 			return new WP_Error( 'not_found', __( '404 entry not found.', 'wp-mcp-connect' ), array( 'status' => 404 ) );

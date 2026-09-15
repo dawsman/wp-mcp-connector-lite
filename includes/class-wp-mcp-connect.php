@@ -118,15 +118,6 @@ class WP_MCP_Connect {
 	protected $content;
 
 	/**
-	 * Logger handler instance.
-	 *
-	 * @since    1.0.0
-	 * @access   protected
-	 * @var      WP_MCP_Connect_Logger    $logger    API logging handler.
-	 */
-	protected $logger;
-
-	/**
 	 * Settings handler instance.
 	 *
 	 * @since    1.0.0
@@ -179,15 +170,6 @@ class WP_MCP_Connect {
 	 * @var      WP_MCP_Connect_Menus    $menus    Menu management handler.
 	 */
 	protected $menus;
-
-	/**
-	 * Google Search Console handler instance.
-	 *
-	 * @since    1.0.0
-	 * @access   protected
-	 * @var      WP_MCP_Connect_GSC    $gsc    Google Search Console handler.
-	 */
-	protected $gsc;
 
 	/**
 	 * Customizer handler instance.
@@ -262,15 +244,6 @@ class WP_MCP_Connect {
 	private $webhooks;
 
 	/**
-	 * Automation rules handler.
-	 *
-	 * @since    1.0.0
-	 * @access   private
-	 * @var      WP_MCP_Connect_Rules    $rules    Automation rules handler.
-	 */
-	private $rules;
-
-	/**
 	 * Define the core functionality of the plugin.
 	 *
 	 * @since    1.0.0
@@ -307,14 +280,12 @@ class WP_MCP_Connect {
 		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-media.php';
 		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-content-audit.php';
 		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-content.php';
-		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-logger.php';
 		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-settings.php';
 		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-media-extended.php';
 		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-links.php';
 		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-users.php';
 		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-analytics.php';
 		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-menus.php';
-		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-gsc.php';
 		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-customizer.php';
 		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-tasks.php';
 		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-404-log.php';
@@ -323,13 +294,9 @@ class WP_MCP_Connect {
 		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-health-score.php';
 		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-topology.php';
 		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-link-suggest.php';
-		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-serp-opportunities.php';
 		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-audit-log.php';
-		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-decay.php';
 		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-clusters.php';
-		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-cannibalization.php';
 		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-webhooks.php';
-		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-rules.php';
 		require_once WP_MCP_CONNECT_PATH . 'includes/class-wp-mcp-connect-admin-lite.php';
 	}
 
@@ -343,30 +310,27 @@ class WP_MCP_Connect {
 	private function instantiate_components() {
 		$this->loader         = new WP_MCP_Connect_Loader();
 		$this->seo            = new WP_MCP_Connect_SEO( $this->get_plugin_name(), $this->get_version() );
-		$this->logger         = new WP_MCP_Connect_Logger( $this->get_plugin_name(), $this->get_version() );
-		$this->seo_bulk       = new WP_MCP_Connect_SEO_Bulk( $this->get_plugin_name(), $this->get_version(), $this->logger );
+		$this->seo_bulk       = new WP_MCP_Connect_SEO_Bulk( $this->get_plugin_name(), $this->get_version() );
 		$this->redirects      = new WP_MCP_Connect_Redirects( $this->get_plugin_name(), $this->get_version() );
 		$this->redirects_io   = new WP_MCP_Connect_Redirects_IO( $this->get_plugin_name(), $this->get_version() );
-		$this->api            = new WP_MCP_Connect_API( $this->get_plugin_name(), $this->get_version(), $this->logger );
+		$this->api            = new WP_MCP_Connect_API( $this->get_plugin_name(), $this->get_version() );
 		$this->media          = new WP_MCP_Connect_Media( $this->get_plugin_name(), $this->get_version() );
 		$this->content_audit  = new WP_MCP_Connect_Content_Audit( $this->get_plugin_name(), $this->get_version() );
-		$this->content        = new WP_MCP_Connect_Content( $this->get_plugin_name(), $this->get_version(), $this->logger );
+		$this->content        = new WP_MCP_Connect_Content( $this->get_plugin_name(), $this->get_version() );
 		$this->settings       = new WP_MCP_Connect_Settings( $this->get_plugin_name(), $this->get_version() );
 		$this->media_extended = new WP_MCP_Connect_Media_Extended( $this->get_plugin_name(), $this->get_version() );
 		$this->links          = new WP_MCP_Connect_Links( $this->get_plugin_name(), $this->get_version() );
 		$this->users          = new WP_MCP_Connect_Users( $this->get_plugin_name(), $this->get_version() );
 		$this->analytics      = new WP_MCP_Connect_Analytics( $this->get_plugin_name(), $this->get_version() );
 		$this->menus          = new WP_MCP_Connect_Menus( $this->get_plugin_name(), $this->get_version() );
-		$this->gsc            = new WP_MCP_Connect_GSC( $this->get_plugin_name(), $this->get_version(), $this->logger );
 		$this->customizer     = new WP_MCP_Connect_Customizer( $this->get_plugin_name(), $this->get_version() );
-		$this->tasks          = new WP_MCP_Connect_Tasks( $this->get_plugin_name(), $this->get_version(), $this->logger );
+		$this->tasks          = new WP_MCP_Connect_Tasks( $this->get_plugin_name(), $this->get_version() );
 		$this->log_404        = new WP_MCP_Connect_404_Log( $this->get_plugin_name(), $this->get_version() );
 		$this->ops            = new WP_MCP_Connect_Ops();
 		$this->reports        = new WP_MCP_Connect_Reports();
 		$this->topology       = new WP_MCP_Connect_Topology( $this->get_plugin_name(), $this->get_version() );
 		$this->audit_log      = new WP_MCP_Connect_Audit_Log( $this->get_plugin_name(), $this->get_version() );
 		$this->webhooks       = new WP_MCP_Connect_Webhooks( $this->get_plugin_name(), $this->get_version() );
-		$this->rules          = new WP_MCP_Connect_Rules( $this->get_plugin_name(), $this->get_version() );
 	}
 
 	/**
@@ -388,9 +352,6 @@ class WP_MCP_Connect {
 
 		$admin_lite = new WP_MCP_Connect_Admin_Lite();
 		$this->loader->add_action( 'admin_menu',                    $admin_lite, 'register_admin_menu' );
-		$this->loader->add_action( 'admin_init',                    $admin_lite, 'maybe_handle_gsc_callback' );
-		$this->loader->add_action( 'admin_post_cwp_gsc_connect',    $admin_lite, 'handle_gsc_connect' );
-		$this->loader->add_action( 'admin_post_cwp_gsc_disconnect', $admin_lite, 'handle_gsc_disconnect' );
 	}
 
 	/**
@@ -407,6 +368,9 @@ class WP_MCP_Connect {
 		$this->loader->add_action( 'init', $this->redirects, 'register_redirect_cpt' );
 		$this->loader->add_action( 'template_redirect', $this->redirects, 'perform_redirect', 99 );
 		$this->loader->add_action( 'save_post_cwp_redirect', $this->redirects, 'schedule_cache_rebuild' );
+		$this->loader->add_action( 'before_delete_post', $this->redirects, 'maybe_schedule_cache_rebuild' );
+		$this->loader->add_action( 'trashed_post', $this->redirects, 'maybe_schedule_cache_rebuild' );
+		$this->loader->add_action( 'untrashed_post', $this->redirects, 'maybe_schedule_cache_rebuild' );
 		$this->loader->add_action( 'save_post_cwp_redirect', $this->audit_log, 'log_redirect_change' );
 		$this->loader->add_action( 'cwp_rebuild_redirect_cache', $this->redirects, 'do_cache_rebuild' );
 		$this->loader->add_filter( 'cron_schedules', $this->reports, 'register_schedules' );
@@ -430,14 +394,12 @@ class WP_MCP_Connect {
 		$this->loader->add_action( 'rest_api_init', $this->media, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $this->content_audit, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $this->content, 'register_routes' );
-		$this->loader->add_action( 'rest_api_init', $this->logger, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $this->settings, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $this->media_extended, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $this->links, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $this->users, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $this->analytics, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $this->menus, 'register_routes' );
-		$this->loader->add_action( 'rest_api_init', $this->gsc, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $this->customizer, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $this->tasks, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $this->log_404, 'register_routes' );
@@ -446,20 +408,23 @@ class WP_MCP_Connect {
 		$this->loader->add_action( 'rest_api_init', $this->topology, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $this->audit_log, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $this->webhooks, 'register_routes' );
-		$this->loader->add_action( 'rest_api_init', $this->rules, 'register_routes' );
-		$this->loader->add_action( 'rest_api_init', $this->api, 'track_api_access' );
+		$this->loader->add_filter( 'rest_request_after_callbacks', $this->api, 'track_api_access', 10, 3 );
 
 		$this->loader->add_action( 'add_attachment', $this->media, 'invalidate_missing_alt_cache' );
 		$this->loader->add_action( 'edit_attachment', $this->media, 'invalidate_missing_alt_cache' );
 		$this->loader->add_action( 'delete_attachment', $this->media, 'invalidate_missing_alt_cache' );
+		$this->loader->add_action( 'add_attachment', $this->media_extended, 'index_attachment' );
+		$this->loader->add_action( 'edit_attachment', $this->media_extended, 'index_attachment' );
+		$this->loader->add_filter( 'wp_update_attachment_metadata', $this->media_extended, 'index_attachment_metadata', 10, 2 );
+		$this->loader->add_action( 'init', $this->media_extended, 'maybe_schedule_index' );
+		$this->loader->add_action( 'cwp_media_index_event', $this->media_extended, 'handle_index_cron' );
 		$this->loader->add_action( 'template_redirect', $this->log_404, 'maybe_log_404' );
 		$this->loader->add_action( 'init', $this->tasks, 'register_cpt' );
 		$this->loader->add_action( 'cwp_task_refresh_event', $this->tasks, 'handle_refresh_cron' );
 		$this->loader->add_action( 'cwp_weekly_report_event', $this->reports, 'handle_weekly_cron' );
 		$this->loader->add_action( 'cwp_404_cleanup_event', $this->log_404, 'handle_cleanup_cron' );
-		$this->loader->add_action( 'cwp_evaluate_rules', $this->rules, 'evaluate_rules' );
-		$this->loader->add_action( 'cwp_gsc_scheduled_sync', $this->gsc, 'run_scheduled_sync' );
-		$this->loader->add_action( 'cwp_gsc_manual_sync', $this->gsc, 'run_manual_sync' );
+		$this->loader->add_action( 'init', $this->ops, 'maybe_schedule_prune' );
+		$this->loader->add_action( 'cwp_ops_prune_event', $this->ops, 'handle_prune_cron' );
 	}
 
 	/**

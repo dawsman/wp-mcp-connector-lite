@@ -160,7 +160,8 @@ class WP_MCP_Connect_SEO {
 	 * @param    mixed     $value        The value to save.
 	 * @param    object    $object       The post object.
 	 * @param    string    $field_name   The field name.
-	 * @return   bool|int                True on success, false on failure.
+	 * @return   bool|WP_Error           True on success, false on failure, WP_Error when the
+	 *                                   active SEO plugin has no storage for the field.
 	 */
 	public function update_meta_callback( $value, $object, $field_name ) {
 		$seo_field = $this->get_seo_field_name( $field_name );
@@ -176,7 +177,8 @@ class WP_MCP_Connect_SEO {
 	 * @param    mixed     $value        The value to save.
 	 * @param    object    $object       The post object.
 	 * @param    string    $field_name   The field name.
-	 * @return   bool|int                True on success, false on failure.
+	 * @return   bool|WP_Error           True on success, false on failure, WP_Error when the
+	 *                                   active SEO plugin has no storage for the field.
 	 */
 	public function update_integer_callback( $value, $object, $field_name ) {
 		$seo_field = $this->get_seo_field_name( $field_name );
@@ -209,7 +211,8 @@ class WP_MCP_Connect_SEO {
 	 * @param    mixed     $value        The value to save.
 	 * @param    object    $object       The post object.
 	 * @param    string    $field_name   The field name.
-	 * @return   bool|int                True on success, false on failure.
+	 * @return   bool|WP_Error           True on success, false on failure, WP_Error when the
+	 *                                   active SEO plugin has no storage for the field.
 	 */
 	public function update_boolean_callback( $value, $object, $field_name ) {
 		$seo_field = $this->get_seo_field_name( $field_name );
@@ -226,7 +229,8 @@ class WP_MCP_Connect_SEO {
 	 * @param    mixed     $value        The JSON value to save.
 	 * @param    object    $object       The post object.
 	 * @param    string    $field_name   The field name.
-	 * @return   bool|int|WP_Error       True on success, WP_Error on invalid JSON.
+	 * @return   bool|WP_Error           True on success, WP_Error on invalid JSON or when the
+	 *                                   active SEO plugin has no storage for the field.
 	 */
 	public function update_schema_callback( $value, $object, $field_name ) {
 		$seo_field = $this->get_seo_field_name( $field_name );
@@ -259,19 +263,16 @@ class WP_MCP_Connect_SEO {
 	/**
 	 * Output meta tags in wp_head.
 	 *
-	 * Only outputs if using built-in cwp fields (no third-party SEO plugin).
-	 * This prevents duplicate meta tags when Rank Math, Yoast, or AIOSEO is active.
+	 * Title, description and Open Graph tags are only emitted when no third-party SEO
+	 * plugin is active, so they never duplicate Rank Math / Yoast / AIOSEO output. The
+	 * JSON-LD block is always emitted, because _cwp_schema_json is where this plugin
+	 * stores schema for every SEO plugin (none of them hold a raw JSON-LD document) and
+	 * nothing else would print it.
 	 *
 	 * @since    1.0.0
 	 * @return   void
 	 */
 	public function output_meta_tags() {
-		// Only output meta tags if no third-party SEO plugin is active
-		$seo_plugin = WP_MCP_Connect_SEO_Plugins::get_plugin_info();
-		if ( $seo_plugin['slug'] !== 'cwp' ) {
-			return;
-		}
-
 		if ( ! is_singular() ) {
 			return;
 		}
@@ -281,6 +282,24 @@ class WP_MCP_Connect_SEO {
 			return;
 		}
 
+		$seo_plugin = WP_MCP_Connect_SEO_Plugins::get_plugin_info();
+
+		if ( 'cwp' === $seo_plugin['slug'] ) {
+			$this->output_basic_meta_tags( $post );
+		}
+
+		$this->output_schema_json( $post );
+	}
+
+	/**
+	 * Output the description and Open Graph tags from the built-in cwp fields.
+	 *
+	 * @since    1.0.0
+	 * @access   private
+	 * @param    WP_Post    $post    The current post.
+	 * @return   void
+	 */
+	private function output_basic_meta_tags( $post ) {
 		$desc = get_post_meta( $post->ID, '_cwp_seo_description', true );
 		if ( ! empty( $desc ) ) {
 			echo '<meta name="description" content="' . esc_attr( $desc ) . '" />' . "\n";
@@ -320,16 +339,38 @@ class WP_MCP_Connect_SEO {
 		if ( ! empty( $og_image_url ) ) {
 			echo '<meta property="og:image" content="' . esc_url( $og_image_url ) . '" />' . "\n";
 		}
+	}
 
+	/**
+	 * Output the JSON-LD block stored in _cwp_schema_json.
+	 *
+	 * Runs whichever SEO plugin is active - see output_meta_tags().
+	 *
+	 * @since    1.0.0
+	 * @access   private
+	 * @param    WP_Post    $post    The current post.
+	 * @return   void
+	 */
+	private function output_schema_json( $post ) {
 		$schema_json = get_post_meta( $post->ID, '_cwp_schema_json', true );
-		if ( ! empty( $schema_json ) ) {
-			$decoded = json_decode( $schema_json );
-			if ( $decoded ) {
-				echo '<script type="application/ld+json">' . "\n";
-				echo wp_json_encode( $decoded, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES ) . "\n";
-				echo '</script>' . "\n";
-			}
+
+		if ( empty( $schema_json ) ) {
+			return;
 		}
+
+		if ( is_array( $schema_json ) ) {
+			$decoded = $schema_json;
+		} else {
+			$decoded = json_decode( $schema_json );
+		}
+
+		if ( ! $decoded ) {
+			return;
+		}
+
+		echo '<script type="application/ld+json">' . "\n";
+		echo wp_json_encode( $decoded, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES ) . "\n";
+		echo '</script>' . "\n";
 	}
 
 	/**

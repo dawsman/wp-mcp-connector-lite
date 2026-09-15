@@ -108,7 +108,7 @@ class WP_MCP_Connect_Customizer {
 				array( 'status' => 403 )
 			);
 		}
-		return true;
+		return WP_MCP_Connect_Auth::check_capability( 'edit_theme_options' );
 	}
 
 	/**

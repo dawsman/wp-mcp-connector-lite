@@ -103,7 +103,7 @@ class WP_MCP_Connect_Content_Audit {
 	 * @return   bool    True if user can edit posts.
 	 */
 	public function check_permission() {
-		return current_user_can( 'edit_posts' );
+		return WP_MCP_Connect_Auth::check_capability( 'edit_posts' );
 	}
 
 	/**

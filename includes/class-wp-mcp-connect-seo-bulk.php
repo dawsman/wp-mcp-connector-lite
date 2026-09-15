@@ -37,43 +37,15 @@ class WP_MCP_Connect_SEO_Bulk {
 	private $max_batch_size = 50;
 
 	/**
-	 * Logger handler instance.
-	 *
-	 * @since    1.0.0
-	 * @access   private
-	 * @var      WP_MCP_Connect_Logger|null
-	 */
-	private $logger;
-
-	/**
 	 * Initialize the class and set its properties.
 	 *
 	 * @since    1.0.0
 	 * @param    string                      $plugin_name    The name of the plugin.
 	 * @param    string                      $version        The version of this plugin.
-	 * @param    WP_MCP_Connect_Logger|null  $logger         Optional logger instance.
 	 */
-	public function __construct( $plugin_name, $version, $logger = null ) {
+	public function __construct( $plugin_name, $version ) {
 		$this->plugin_name = $plugin_name;
 		$this->version = $version;
-		$this->logger = $logger;
-	}
-
-	/**
-	 * Log an API request if logger is available.
-	 *
-	 * @since    1.0.0
-	 * @param    string    $endpoint       The API endpoint.
-	 * @param    string    $method         HTTP method.
-	 * @param    int       $status_code    HTTP status code.
-	 * @param    float     $response_time  Response time in milliseconds.
-	 * @param    string    $description    Optional description of the action.
-	 * @return   void
-	 */
-	private function log_request( $endpoint, $method, $status_code, $response_time, $description = null ) {
-		if ( $this->logger ) {
-			$this->logger->log_request( $endpoint, $method, $status_code, $response_time, $description );
-		}
 	}
 
 	/**
@@ -156,7 +128,7 @@ class WP_MCP_Connect_SEO_Bulk {
 	 * @return   bool    True if user can edit posts.
 	 */
 	public function check_permission() {
-		return current_user_can( 'edit_posts' );
+		return WP_MCP_Connect_Auth::check_capability( 'edit_posts' );
 	}
 
 	/**
@@ -167,7 +139,6 @@ class WP_MCP_Connect_SEO_Bulk {
 	 * @return   array                          Audit results.
 	 */
 	public function audit_seo( $request ) {
-		$start_time = microtime( true );
 		$post_type = $request->get_param( 'post_type' );
 		$missing_fields = $request->get_param( 'missing_fields' );
 		$page = max( 1, $request->get_param( 'page' ) );
@@ -281,9 +252,6 @@ class WP_MCP_Connect_SEO_Bulk {
 			wp_reset_postdata();
 		}
 
-		$response_time = ( microtime( true ) - $start_time ) * 1000;
-		$this->log_request( '/mcp/v1/seo/audit', 'GET', 200, $response_time, sprintf( 'Audited SEO for %d posts', count( $results ) ) );
-
 		return array(
 			'results'     => $results,
 			'total'       => $query->found_posts,
@@ -302,12 +270,9 @@ class WP_MCP_Connect_SEO_Bulk {
 	 * @return   array|WP_Error                 Update results or error.
 	 */
 	public function bulk_update_seo( $request ) {
-		$start_time = microtime( true );
 		$updates = $request->get_param( 'updates' );
 
 		if ( ! is_array( $updates ) || empty( $updates ) ) {
-			$response_time = ( microtime( true ) - $start_time ) * 1000;
-			$this->log_request( '/mcp/v1/seo/bulk-update', 'POST', 400, $response_time, 'Bulk update failed: no updates provided' );
 			return new WP_Error(
 				'invalid_data',
 				__( 'No updates provided.', 'wp-mcp-connect' ),
@@ -316,8 +281,6 @@ class WP_MCP_Connect_SEO_Bulk {
 		}
 
 		if ( count( $updates ) > $this->max_batch_size ) {
-			$response_time = ( microtime( true ) - $start_time ) * 1000;
-			$this->log_request( '/mcp/v1/seo/bulk-update', 'POST', 400, $response_time, 'Bulk update failed: batch too large' );
 			return new WP_Error(
 				'batch_too_large',
 				sprintf( __( 'Maximum %d updates per request.', 'wp-mcp-connect' ), $this->max_batch_size ),
@@ -381,7 +344,29 @@ class WP_MCP_Connect_SEO_Bulk {
 					$value = sanitize_text_field( $value );
 				}
 
-				WP_MCP_Connect_SEO_Plugins::set_seo_value( $post_id, $field_name, $value );
+				$saved = WP_MCP_Connect_SEO_Plugins::set_seo_value( $post_id, $field_name, $value );
+
+				if ( is_wp_error( $saved ) ) {
+					$results['errors'][] = sprintf(
+						/* translators: 1: item number, 2: SEO field name, 3: error message. */
+						__( 'Item %1$d: could not set %2$s - %3$s', 'wp-mcp-connect' ),
+						$index + 1,
+						$field_name,
+						$saved->get_error_message()
+					);
+					continue;
+				}
+
+				if ( false === $saved ) {
+					$results['errors'][] = sprintf(
+						/* translators: 1: item number, 2: SEO field name. */
+						__( 'Item %1$d: failed to save %2$s.', 'wp-mcp-connect' ),
+						$index + 1,
+						$field_name
+					);
+					continue;
+				}
+
 				$updated_fields++;
 			}
 
@@ -390,9 +375,6 @@ class WP_MCP_Connect_SEO_Bulk {
 				$previous_state[] = $before;
 			}
 		}
-
-		$response_time = ( microtime( true ) - $start_time ) * 1000;
-		$this->log_request( '/mcp/v1/seo/bulk-update', 'POST', 200, $response_time, sprintf( 'Updated SEO for %d posts', $results['updated'] ) );
 
 		if ( class_exists( 'WP_MCP_Connect_Ops' ) && ! empty( $previous_state ) ) {
 			WP_MCP_Connect_Ops::log_operation( 'seo_bulk', array( 'count' => $results['updated'] ), $previous_state );
@@ -411,14 +393,11 @@ class WP_MCP_Connect_SEO_Bulk {
 	 * @return   array|WP_Error                 Result or error.
 	 */
 	public function set_noindex( $request ) {
-		$start_time = microtime( true );
 		$post_id = $request->get_param( 'post_id' );
 		$noindex = $request->get_param( 'noindex' );
 
 		$post = get_post( $post_id );
 		if ( ! $post ) {
-			$response_time = ( microtime( true ) - $start_time ) * 1000;
-			$this->log_request( '/mcp/v1/seo/noindex', 'POST', 404, $response_time, 'Post not found: ' . $post_id );
 			return new WP_Error(
 				'not_found',
 				__( 'Post not found.', 'wp-mcp-connect' ),
@@ -427,8 +406,6 @@ class WP_MCP_Connect_SEO_Bulk {
 		}
 
 		if ( ! current_user_can( 'edit_post', $post_id ) ) {
-			$response_time = ( microtime( true ) - $start_time ) * 1000;
-			$this->log_request( '/mcp/v1/seo/noindex', 'POST', 403, $response_time, 'Permission denied for post: ' . $post_id );
 			return new WP_Error(
 				'forbidden',
 				__( 'You do not have permission to edit this content.', 'wp-mcp-connect' ),
@@ -448,17 +425,16 @@ class WP_MCP_Connect_SEO_Bulk {
 			$value = $noindex ? '1' : '2';
 			$result = update_post_meta( $post_id, '_yoast_wpseo_meta-robots-noindex', $value );
 		} elseif ( 'aioseo' === $plugin['slug'] ) {
-			// AIOSEO stores in JSON format.
-			$robots = array( 'noindex' => $noindex );
-			$result = update_post_meta( $post_id, '_aioseo_robots', wp_json_encode( $robots ) );
+			// AIOSEO 4.x keeps robots settings in its own aioseo_posts table, not post meta.
+			$result = WP_MCP_Connect_SEO_Plugins::set_aioseo_robots_noindex( $post_id, $noindex );
+
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
 		} else {
 			// Fallback: use built-in meta.
 			$result = update_post_meta( $post_id, '_cwp_noindex', $noindex ? '1' : '0' );
 		}
-
-		$response_time = ( microtime( true ) - $start_time ) * 1000;
-		$action = $noindex ? 'noindex' : 'index';
-		$this->log_request( '/mcp/v1/seo/noindex', 'POST', 200, $response_time, "Set {$action} on post {$post_id}" );
 
 		return array(
 			'success'   => (bool) $result,

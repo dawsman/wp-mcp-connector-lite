@@ -10,7 +10,7 @@
 
 ### Give your AI a WordPress backstage pass.
 
-A headless WordPress plugin that opens **106 REST endpoints** for MCP clients<br>
+A headless WordPress plugin that opens **66 REST endpoints** for MCP clients<br>
 to manage SEO, redirects, media, audits, analytics, and content — through plain conversation.
 
 <br>
@@ -20,7 +20,7 @@ to manage SEO, redirects, media, audits, analytics, and content — through plai
   <img alt="WordPress" src="https://img.shields.io/badge/WordPress-5.0%2B-21759b?style=flat-square&logo=wordpress&logoColor=white">
   <img alt="PHP" src="https://img.shields.io/badge/PHP-7.4%2B-777BB4?style=flat-square&logo=php&logoColor=white">
   <img alt="License" src="https://img.shields.io/badge/license-GPL--2.0%2B-blue?style=flat-square">
-  <img alt="Endpoints" src="https://img.shields.io/badge/REST%20endpoints-106-22c55e?style=flat-square">
+  <img alt="Endpoints" src="https://img.shields.io/badge/REST%20endpoints-66-22c55e?style=flat-square">
 </p>
 
 <sub>Pair with any MCP-compatible client — Claude Desktop, Cursor, VS Code — and talk to your site.</sub>
@@ -33,7 +33,7 @@ to manage SEO, redirects, media, audits, analytics, and content — through plai
 
 ## ✨ What is this?
 
-**WP MCP Connect Lite** is the WordPress half of an MCP integration. It runs quietly inside your site, exposing a dense REST surface that an MCP server can call to read content, edit metadata, audit health, sync Search Console, and far more.
+**WP MCP Connect Lite** is the WordPress half of an MCP integration. It runs quietly inside your site, exposing a dense REST surface that an MCP server can call to read content, edit metadata, audit health, map internal links, and far more.
 
 > 🪶 **Lite?** This package is the **plugin only** — no React admin dashboard, no Node server bundled.<br>Bring your own MCP server (or use the companion repo) and point it at your site.
 
@@ -52,7 +52,7 @@ Title tags, meta descriptions, Open Graph, JSON-LD schema. Bulk edit, focus keyw
 <td width="33%" valign="top">
 
 ### 🪄 Audits
-Surface broken links, thin content, missing alt text, orphaned pages, decaying posts — with fixes you can apply.
+Surface broken links, thin content, missing alt text and orphaned pages — with fixes you can apply.
 
 </td>
 <td width="33%" valign="top">
@@ -65,8 +65,8 @@ Custom post type with import/export, enable/disable toggles, and 404-log promoti
 <tr>
 <td valign="top">
 
-### 📊 Search Console
-OAuth-connect GSC, sync queries, surface cannibalization, content gaps, and CTR-curve opportunities.
+### 🩺 Health scores
+Score any post 0-100 on SEO completeness, freshness and internal linking, in bulk or one at a time.
 
 </td>
 <td valign="top">
@@ -93,13 +93,11 @@ flowchart LR
     A["🤖 MCP Client"] -->|stdio| B["🟢 MCP Server"]
     B -->|"HTTPS + App Password"| C["🐘 WordPress + this plugin"]
     C --> D[("💾 Database")]
-    C -.->|"OAuth"| E["🔎 Search Console"]
 
     style A fill:#0b0d12,stroke:#3858E9,color:#fff,stroke-width:2px
     style B fill:#22c55e,stroke:#15803d,color:#fff,stroke-width:2px
     style C fill:#3858E9,stroke:#1e3a8a,color:#fff,stroke-width:2px
     style D fill:#1e1b4b,stroke:#a78bfa,color:#e9d5ff,stroke-width:2px
-    style E fill:#1e1b4b,stroke:#fbbf24,color:#fef3c7,stroke-width:2px
 ```
 
 Your MCP client talks to a thin Node server. That server hits **`/wp-json/mcp/v1/*`** on your site, which this plugin registers and authenticates using a WordPress Application Password.
@@ -146,15 +144,14 @@ WP_APP_PASSWORD=xxxx xxxx xxxx xxxx xxxx xxxx
 ## 🧩 Endpoint surface
 
 <details>
-<summary><b>106 REST routes — click to expand a sampler</b></summary>
+<summary><b>66 REST routes — click to expand a sampler</b></summary>
 
 | Namespace | Examples |
 |---|---|
-| **Content** | `/content/broken-links` · `/content/thin` · `/content/orphaned` · `/content/decay` · `/content/clusters` · `/content/duplicates` |
+| **Content** | `/content/broken-links` · `/content/thin` · `/content/orphaned` · `/content/clusters` · `/content/duplicates` |
 | **SEO** | `/seo/bulk` · `/seo/meta-suggest` · `/seo/plugins` · focus keyword + cornerstone flags |
 | **Redirects** | `redirects` CPT · `/redirects/io` (import/export) · 404 → redirect promotion |
 | **Audits** | `/audit/summary` · `/audit-log` · `/tasks` queue · CSV export |
-| **GSC** | `/gsc/auth/*` · `/gsc/insights` · `/gsc/cannibalization` · `/gsc/content-gaps` · `/gsc/ctr-curve` |
 | **Analytics** | `/analytics/popular-posts` · topology · health-score |
 | **Media** | `/content/broken-images` · alt-text bulk · media-extended |
 | **Comments** | `/comments/pending` · `/comments/moderate` · `/comments/bulk-moderate` |
@@ -182,7 +179,7 @@ Authorization: Basic <base64(username:app_password)>
 
 ```bash
 composer install
-vendor/bin/phpunit              # run the test suite
+bin/test-local.sh               # run the test suite (handles the setup below)
 vendor/bin/phpcs                # lint to WordPress coding standards
 vendor/bin/phpcbf               # auto-fix style issues
 ./build.sh                      # produce a distributable zip
@@ -192,12 +189,28 @@ Requires **PHP 7.4+** and **WordPress 5.0+**. Tested up to **WordPress 6.7**.
 
 <br>
 
+### Testing
+
+The suite runs against the real WordPress test library, so it needs a throwaway
+database and a copy of WordPress core. `bin/test-local.sh` (or `composer
+test:local`) does the lot: it starts a MySQL container on port 33306, downloads
+the test library into `~/.cache/wp-mcp-connect-tests` — outside the repo,
+because the generated config hard-codes an absolute path — runs `php -l` over
+every source file, then PHPUnit. Add `--teardown` to remove the container when
+you're finished, or `--fresh` to rebuild everything from scratch. To point
+PHPUnit at an existing install instead, set `WP_TESTS_DIR` and run
+`vendor/bin/phpunit` directly. The same steps run on every push through the
+`test` job in `.github/workflows/release.yml`, and a release cannot publish
+unless they pass on both PHP 7.4 and 8.2.
+
+<br>
+
 ## 🗣️ What you can ask your MCP client
 
 Once connected, the client speaks WordPress on your behalf:
 
 > *"Find every post missing a meta description and draft one for each."*<br>
-> *"Show pages that lost the most clicks in GSC last month."*<br>
+> *"Score my service pages for content health and show me the worst five."*<br>
 > *"Create a redirect from `/old-offer` to `/new-offer` and resolve the 404."*<br>
 > *"List orphaned posts and suggest internal links from cluster siblings."*<br>
 > *"Add FAQ schema to the pricing page."*<br>

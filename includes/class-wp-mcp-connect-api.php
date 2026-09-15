@@ -28,26 +28,15 @@ class WP_MCP_Connect_API {
 	private $version;
 
 	/**
-	 * Logger instance for API request logging.
-	 *
-	 * @since    1.0.0
-	 * @access   private
-	 * @var      WP_MCP_Connect_Logger    $logger    Logger instance.
-	 */
-	private $logger;
-
-	/**
 	 * Initialize the class and set its properties.
 	 *
 	 * @since    1.0.0
 	 * @param    string                   $plugin_name    The name of the plugin.
 	 * @param    string                   $version        The version of this plugin.
-	 * @param    WP_MCP_Connect_Logger    $logger         Logger instance.
 	 */
-	public function __construct( $plugin_name, $version, $logger ) {
+	public function __construct( $plugin_name, $version ) {
 		$this->plugin_name = $plugin_name;
 		$this->version = $version;
-		$this->logger = $logger;
 	}
 
 	/**
@@ -149,33 +138,6 @@ class WP_MCP_Connect_API {
 			'permission_callback' => array( $this, 'check_edit_permission' ),
 		) );
 
-		register_rest_route( 'mcp/v1', '/gsc/position-brackets', array(
-			'methods'             => 'GET',
-			'callback'            => array( $this, 'get_position_brackets' ),
-			'permission_callback' => array( $this, 'check_edit_permission' ),
-		) );
-
-		register_rest_route( 'mcp/v1', '/gsc/serp-opportunities', array(
-			'methods'             => 'GET',
-			'callback'            => array( $this, 'get_serp_opportunities' ),
-			'permission_callback' => array( $this, 'check_admin_permission' ),
-		) );
-
-		register_rest_route( 'mcp/v1', '/content/decay', array(
-			'methods'             => 'GET',
-			'callback'            => array( $this, 'get_content_decay' ),
-			'permission_callback' => array( $this, 'check_admin_permission' ),
-			'args'                => array(
-				'limit' => array( 'type' => 'integer', 'default' => 50 ),
-			),
-		) );
-
-		register_rest_route( 'mcp/v1', '/content/decay/summary', array(
-			'methods'             => 'GET',
-			'callback'            => array( $this, 'get_decay_summary' ),
-			'permission_callback' => array( $this, 'check_admin_permission' ),
-		) );
-
 		register_rest_route( 'mcp/v1', '/repair-rankmath-schema', array(
 			'methods'             => 'POST',
 			'callback'            => array( $this, 'repair_rankmath_schema' ),
@@ -270,15 +232,6 @@ class WP_MCP_Connect_API {
 			),
 		) );
 
-		register_rest_route( 'mcp/v1', '/seo/cannibalization', array(
-			'methods'             => 'GET',
-			'callback'            => array( $this, 'get_cannibalization' ),
-			'permission_callback' => array( $this, 'check_admin_permission' ),
-			'args'                => array(
-				'limit' => array( 'type' => 'integer', 'default' => 20 ),
-			),
-		) );
-
 		register_rest_route( 'mcp/v1', '/api-access', array(
 			'methods'             => 'GET',
 			'callback'            => array( $this, 'get_api_access_info' ),
@@ -303,16 +256,7 @@ class WP_MCP_Connect_API {
 	 * @return   bool|WP_Error    True if permitted, WP_Error on rate limit or IP blocked.
 	 */
 	public function check_edit_permission() {
-		if ( ! current_user_can( 'edit_posts' ) ) {
-			return false;
-		}
-
-		$ip_check = WP_MCP_Connect_Auth::check_ip_filtering();
-		if ( is_wp_error( $ip_check ) ) {
-			return $ip_check;
-		}
-
-		return WP_MCP_Connect_Auth::check_rate_limit();
+		return WP_MCP_Connect_Auth::check_capability( 'edit_posts' );
 	}
 
 	/**
@@ -326,8 +270,6 @@ class WP_MCP_Connect_API {
 	 * @return   WP_REST_Response                    System information.
 	 */
 	public function get_system_info( $request = null ) {
-		$start_time = microtime( true );
-
 		$result = array(
 			'site_name'           => get_bloginfo( 'name' ),
 			'site_url'            => home_url(),
@@ -336,7 +278,6 @@ class WP_MCP_Connect_API {
 			'active_theme'        => get_stylesheet(),
 			'active_plugin_count' => count( get_option( 'active_plugins', array() ) ),
 			'seo_plugin'          => WP_MCP_Connect_SEO_Plugins::get_plugin_info(),
-			'gsc_connected'       => ! empty( get_option( 'cwp_gsc_site_url', '' ) ),
 			'plugin_version'      => $this->version,
 		);
 
@@ -344,9 +285,6 @@ class WP_MCP_Connect_API {
 			$result['php_version'] = phpversion();
 			$result['plugins']     = $this->get_active_plugins();
 		}
-
-		$response_time = ( microtime( true ) - $start_time ) * 1000;
-		$this->logger->log_request( '/mcp/v1/system', 'GET', 200, $response_time, 'Fetched system information' );
 
 		return rest_ensure_response( $result );
 	}
@@ -383,8 +321,6 @@ class WP_MCP_Connect_API {
 	 * @return   array|WP_Error                 Search results or error.
 	 */
 	public function advanced_search( $request ) {
-		$start_time = microtime( true );
-
 		$term = $request->get_param( 'term' );
 		$post_type = $request->get_param( 'post_type' );
 		$per_page = $request->get_param( 'per_page' );
@@ -408,8 +344,6 @@ class WP_MCP_Connect_API {
 			if ( in_array( $post_type, $public_post_types, true ) ) {
 				$args['post_type'] = $post_type;
 			} else {
-				$response_time = ( microtime( true ) - $start_time ) * 1000;
-				$this->logger->log_request( '/mcp/v1/search', 'GET', 400, $response_time, 'Search failed: invalid post type' );
 				return new WP_Error(
 					'invalid_post_type',
 					__( 'Invalid or non-public post type specified.', 'wp-mcp-connect' ),
@@ -438,13 +372,6 @@ class WP_MCP_Connect_API {
 			wp_reset_postdata();
 		}
 
-		$response_time = ( microtime( true ) - $start_time ) * 1000;
-		$search_desc = ! empty( $term ) ? sprintf( 'Searched for "%s"', $term ) : 'Listed posts';
-		if ( ! empty( $post_type ) && is_string( $args['post_type'] ) ) {
-			$search_desc .= sprintf( ' (%s)', $post_type );
-		}
-		$this->logger->log_request( '/mcp/v1/search', 'GET', 200, $response_time, $search_desc );
-
 		return array(
 			'results'     => $results,
 			'total'       => $query->found_posts,
@@ -467,15 +394,11 @@ class WP_MCP_Connect_API {
 	 * @return   array|WP_Error                 Repair results or error.
 	 */
 	public function repair_rankmath_schema( $request ) {
-		$start_time = microtime( true );
-
 		$post_id = $request->get_param( 'post_id' );
 
 		// Check if RankMath is active.
 		$seo_plugin = WP_MCP_Connect_SEO_Plugins::get_plugin_info();
 		if ( 'rank_math' !== $seo_plugin['slug'] ) {
-			$response_time = ( microtime( true ) - $start_time ) * 1000;
-			$this->logger->log_request( '/mcp/v1/repair-rankmath-schema', 'POST', 400, $response_time, 'Repair failed: RankMath not active' );
 			return new WP_Error(
 				'rankmath_not_active',
 				__( 'RankMath is not the active SEO plugin. This repair tool only applies to RankMath.', 'wp-mcp-connect' ),
@@ -487,8 +410,6 @@ class WP_MCP_Connect_API {
 			// Repair single post.
 			$post = get_post( $post_id );
 			if ( ! $post ) {
-				$response_time = ( microtime( true ) - $start_time ) * 1000;
-				$this->logger->log_request( '/mcp/v1/repair-rankmath-schema', 'POST', 404, $response_time, sprintf( 'Repair failed: post %d not found', $post_id ) );
 				return new WP_Error(
 					'post_not_found',
 					__( 'Post not found.', 'wp-mcp-connect' ),
@@ -497,9 +418,6 @@ class WP_MCP_Connect_API {
 			}
 
 			$result = WP_MCP_Connect_SEO_Plugins::repair_rank_math_schema( $post_id );
-
-			$response_time = ( microtime( true ) - $start_time ) * 1000;
-			$this->logger->log_request( '/mcp/v1/repair-rankmath-schema', 'POST', 200, $response_time, sprintf( 'Repaired schema for post %d', $post_id ) );
 
 			return array(
 				'success'  => true,
@@ -516,9 +434,6 @@ class WP_MCP_Connect_API {
 		$affected_count = count( $affected_posts );
 
 		if ( 0 === $affected_count ) {
-			$response_time = ( microtime( true ) - $start_time ) * 1000;
-			$this->logger->log_request( '/mcp/v1/repair-rankmath-schema', 'POST', 200, $response_time, 'No corrupted schemas found' );
-
 			return array(
 				'success'        => true,
 				'message'        => __( 'No posts with corrupted RankMath schema found.', 'wp-mcp-connect' ),
@@ -528,9 +443,6 @@ class WP_MCP_Connect_API {
 		}
 
 		$rows_deleted = WP_MCP_Connect_SEO_Plugins::repair_rank_math_schema();
-
-		$response_time = ( microtime( true ) - $start_time ) * 1000;
-		$this->logger->log_request( '/mcp/v1/repair-rankmath-schema', 'POST', 200, $response_time, sprintf( 'Repaired %d posts', $affected_count ) );
 
 		return array(
 			'success'        => true,
@@ -607,20 +519,6 @@ class WP_MCP_Connect_API {
 	}
 
 	/**
-	 * Get SERP feature opportunities based on CTR gap analysis.
-	 *
-	 * @since    1.0.0
-	 * @return   WP_REST_Response    Opportunities data.
-	 */
-	public function get_serp_opportunities() {
-		$opportunities = WP_MCP_Connect_SERP_Opportunities::find_opportunities();
-		return rest_ensure_response( array(
-			'opportunities' => $opportunities,
-			'count'         => count( $opportunities ),
-		) );
-	}
-
-	/**
 	 * Get content clusters grouped by taxonomy.
 	 *
 	 * @since    1.0.0
@@ -629,19 +527,6 @@ class WP_MCP_Connect_API {
 	public function get_content_clusters() {
 		$clusters = WP_MCP_Connect_Clusters::build_clusters();
 		return rest_ensure_response( array( 'clusters' => $clusters, 'count' => count( $clusters ) ) );
-	}
-
-	/**
-	 * Get keyword cannibalization conflicts.
-	 *
-	 * @since    1.0.0
-	 * @param    WP_REST_Request    $request    The REST request object.
-	 * @return   WP_REST_Response               Conflicts data.
-	 */
-	public function get_cannibalization( $request ) {
-		$limit = min( 50, max( 1, (int) $request->get_param( 'limit' ) ) );
-		$conflicts = WP_MCP_Connect_Cannibalization::find_conflicts( $limit );
-		return rest_ensure_response( array( 'conflicts' => $conflicts, 'count' => count( $conflicts ) ) );
 	}
 
 	/**
@@ -810,142 +695,6 @@ class WP_MCP_Connect_API {
 	}
 
 	/**
-	 * Get position bracket analysis from GSC data.
-	 *
-	 * @since    1.0.0
-	 * @return   WP_REST_Response|WP_Error    Position bracket data.
-	 */
-	public function get_position_brackets() {
-		global $wpdb;
-
-		$table = $wpdb->prefix . 'cwp_gsc_data';
-
-		$table_exists = $wpdb->get_var(
-			$wpdb->prepare( 'SHOW TABLES LIKE %s', $table )
-		);
-
-		if ( ! $table_exists ) {
-			return new WP_Error(
-				'no_gsc_data',
-				__( 'GSC data table does not exist. Run a GSC sync first.', 'wp-mcp-connect' ),
-				array( 'status' => 404 )
-			);
-		}
-
-		// 1. Position brackets.
-		$brackets = array();
-		$bands    = array(
-			array( 'label' => '1-3',  'min' => 0,    'max' => 3.999  ),
-			array( 'label' => '4-10', 'min' => 4,    'max' => 10.999 ),
-			array( 'label' => '11-20', 'min' => 11,  'max' => 20.999 ),
-			array( 'label' => '21-50', 'min' => 21,  'max' => 50.999 ),
-			array( 'label' => '50+',   'min' => 51,  'max' => 999999 ),
-		);
-
-		foreach ( $bands as $band ) {
-			$row = $wpdb->get_row(
-				$wpdb->prepare(
-					"SELECT COUNT(*) AS page_count, COALESCE(SUM(impressions), 0) AS total_impressions, COALESCE(SUM(clicks), 0) AS total_clicks FROM {$table} WHERE avg_position >= %f AND avg_position <= %f", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-					$band['min'],
-					$band['max']
-				)
-			);
-
-			$brackets[] = array(
-				'position_band'    => $band['label'],
-				'page_count'       => (int) $row->page_count,
-				'total_impressions' => (int) $row->total_impressions,
-				'total_clicks'     => (int) $row->total_clicks,
-			);
-		}
-
-		// 2. Striking distance: positions 4-10 with impressions >= 100.
-		$striking_distance = $wpdb->get_results(
-			"SELECT g.url, g.post_id, g.avg_position, g.impressions, g.clicks, g.ctr, g.prev_position, g.top_query,
-				COALESCE(p.post_title, '') AS post_title
-			FROM {$table} AS g
-			LEFT JOIN {$wpdb->posts} AS p ON g.post_id = p.ID
-			WHERE g.avg_position >= 4 AND g.avg_position <= 10.999
-				AND g.impressions >= 100
-			ORDER BY g.impressions DESC
-			LIMIT 20" // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		);
-
-		$striking = array();
-		foreach ( $striking_distance as $row ) {
-			$striking[] = array(
-				'url'           => $row->url,
-				'post_id'       => (int) $row->post_id,
-				'avg_position'  => round( (float) $row->avg_position, 1 ),
-				'impressions'   => (int) $row->impressions,
-				'clicks'        => (int) $row->clicks,
-				'ctr'           => round( (float) $row->ctr, 4 ),
-				'prev_position' => $row->prev_position ? round( (float) $row->prev_position, 1 ) : null,
-				'top_query'     => $row->top_query ?: null,
-				'post_title'    => $row->post_title,
-			);
-		}
-
-		// 3. Movers: pages with |position change| >= 3.
-		$movers_raw = $wpdb->get_results(
-			"SELECT g.url, g.post_id, g.avg_position, g.prev_position, g.impressions, g.clicks, g.ctr, g.top_query,
-				COALESCE(p.post_title, '') AS post_title,
-				(g.prev_position - g.avg_position) AS position_change
-			FROM {$table} AS g
-			LEFT JOIN {$wpdb->posts} AS p ON g.post_id = p.ID
-			WHERE g.prev_position IS NOT NULL
-				AND ABS(g.prev_position - g.avg_position) >= 3
-			ORDER BY ABS(g.prev_position - g.avg_position) DESC
-			LIMIT 20" // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		);
-
-		$movers = array();
-		foreach ( $movers_raw as $row ) {
-			$movers[] = array(
-				'url'             => $row->url,
-				'post_id'         => (int) $row->post_id,
-				'avg_position'    => round( (float) $row->avg_position, 1 ),
-				'prev_position'   => round( (float) $row->prev_position, 1 ),
-				'position_change' => round( (float) $row->position_change, 1 ),
-				'impressions'     => (int) $row->impressions,
-				'clicks'          => (int) $row->clicks,
-				'ctr'             => round( (float) $row->ctr, 4 ),
-				'top_query'       => $row->top_query ?: null,
-				'post_title'      => $row->post_title,
-			);
-		}
-
-		return rest_ensure_response( array(
-			'brackets'          => $brackets,
-			'striking_distance' => $striking,
-			'movers'            => $movers,
-		) );
-	}
-
-	/**
-	 * Get content decay analysis for pages with GSC data.
-	 *
-	 * @since    1.0.0
-	 * @param    WP_REST_Request    $request    The REST request object.
-	 * @return   WP_REST_Response               Decay analysis data.
-	 */
-	public function get_content_decay( $request ) {
-		$limit = min( 100, max( 1, (int) $request->get_param( 'limit' ) ) );
-		$results = WP_MCP_Connect_Decay::analyze_all( $limit );
-		return rest_ensure_response( array( 'pages' => $results, 'count' => count( $results ) ) );
-	}
-
-	/**
-	 * Get content decay summary counts by status.
-	 *
-	 * @since    1.0.0
-	 * @return   WP_REST_Response    Decay summary counts.
-	 */
-	public function get_decay_summary() {
-		return rest_ensure_response( WP_MCP_Connect_Decay::get_summary() );
-	}
-
-	/**
 	 * Get cross-audit summary aggregating issue counts from all audit types.
 	 *
 	 * @since    1.0.0
@@ -962,12 +711,6 @@ class WP_MCP_Connect_API {
 
 		// Link issues.
 		$summary['links'] = $this->get_link_audit_counts();
-
-		// Content decay.
-		$summary['decay'] = array();
-		if ( class_exists( 'WP_MCP_Connect_Decay' ) ) {
-			$summary['decay'] = WP_MCP_Connect_Decay::get_summary();
-		}
 
 		// Health score distribution.
 		$summary['health'] = array();
@@ -1010,18 +753,22 @@ class WP_MCP_Connect_API {
 				$post_types   = get_post_types( array( 'public' => true ), 'names' );
 				$placeholders = implode( ',', array_fill( 0, count( $post_types ), '%s' ) );
 
+				// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 				$summary['orphan_pages'] = (int) $wpdb->get_var( $wpdb->prepare(
 					"SELECT COUNT(*) FROM {$wpdb->posts} p
 					 WHERE p.post_status = 'publish' AND p.post_type IN ({$placeholders})
 					 AND p.ID NOT IN (SELECT DISTINCT target_post_id FROM {$topo_table})", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 					...array_values( $post_types )
 				) );
+				// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 				$summary['dead_ends'] = (int) $wpdb->get_var( $wpdb->prepare(
 					"SELECT COUNT(*) FROM {$wpdb->posts} p
 					 WHERE p.post_status = 'publish' AND p.post_type IN ({$placeholders})
 					 AND p.ID NOT IN (SELECT DISTINCT source_post_id FROM {$topo_table})", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 					...array_values( $post_types )
 				) );
+				// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 			}
 		}
 
@@ -1053,6 +800,7 @@ class WP_MCP_Connect_API {
 			...array_values( $post_types )
 		) );
 
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$with_title = (int) $wpdb->get_var( $wpdb->prepare(
 			"SELECT COUNT(DISTINCT p.ID) FROM {$wpdb->posts} p
 			 INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id
@@ -1060,7 +808,9 @@ class WP_MCP_Connect_API {
 			 AND pm.meta_key = '_cwp_seo_title' AND pm.meta_value != ''", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 			...array_values( $post_types )
 		) );
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$with_desc = (int) $wpdb->get_var( $wpdb->prepare(
 			"SELECT COUNT(DISTINCT p.ID) FROM {$wpdb->posts} p
 			 INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id
@@ -1068,6 +818,7 @@ class WP_MCP_Connect_API {
 			 AND pm.meta_key = '_cwp_seo_description' AND pm.meta_value != ''", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 			...array_values( $post_types )
 		) );
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
 		$missing_title = $total - $with_title;
 		$missing_desc  = $total - $with_desc;
@@ -1120,28 +871,43 @@ class WP_MCP_Connect_API {
 	/**
 	 * Track last API access time for security monitoring.
 	 *
-	 * Only tracks authenticated REST API requests to the mcp namespace.
-	 * Throttled to once per minute to avoid excessive writes.
+	 * Hooked to rest_request_after_callbacks so the route's permission_callback
+	 * has already resolved authentication; calling wp_get_current_user() here
+	 * reliably returns the app-password-authenticated user. Hooking earlier
+	 * (e.g. rest_api_init) misses requests when $current_user has been set to
+	 * anonymous by an earlier hook before our app password auth had a chance
+	 * to run. Throttled to once per minute to avoid excessive writes.
 	 *
 	 * @since    1.0.0
-	 * @return   void
+	 * @param    mixed              $response Response from dispatch_request (passed through unchanged).
+	 * @param    array              $handler  Route handler (unused).
+	 * @param    WP_REST_Request    $request  REST request object (unused).
+	 * @return   mixed                        Unchanged $response.
 	 */
-	public function track_api_access() {
-		// Only track authenticated REST API requests.
-		if ( ! defined( 'REST_REQUEST' ) || ! REST_REQUEST ) {
-			return;
+	public function track_api_access( $response, $handler = null, $request = null ) {
+		// This filter fires for every REST namespace (wp/v2 block-editor
+		// traffic included) and also after a failed permission_callback, so
+		// scope it to successful mcp/v1 requests only.
+		if ( ! $request instanceof WP_REST_Request || 0 !== strpos( $request->get_route(), '/mcp/v1/' ) ) {
+			return $response;
+		}
+		if ( is_wp_error( $response ) ) {
+			return $response;
+		}
+		if ( $response instanceof WP_REST_Response && $response->is_error() ) {
+			return $response;
 		}
 
 		$user = wp_get_current_user();
 		if ( ! $user->ID ) {
-			return;
+			return $response;
 		}
 
 		// Only update once per minute to avoid excessive writes.
 		$last = get_option( 'cwp_api_last_access', array() );
 		$now  = time();
 		if ( isset( $last['timestamp'] ) && ( $now - $last['timestamp'] ) < 60 ) {
-			return;
+			return $response;
 		}
 
 		update_option( 'cwp_api_last_access', array(
@@ -1150,6 +916,8 @@ class WP_MCP_Connect_API {
 			'user_login' => $user->user_login,
 			'ip'         => class_exists( 'WP_MCP_Connect_Auth' ) ? WP_MCP_Connect_Auth::get_client_ip() : '',
 		), false );
+
+		return $response;
 	}
 
 	/**

@@ -249,13 +249,14 @@ class WP_MCP_Connect_Topology {
 		$query_args[] = (int) $batch_size;
 		$query_args[] = (int) $offset;
 
-		// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$posts = $wpdb->get_col(
 			$wpdb->prepare(
 				"SELECT ID FROM {$wpdb->posts} WHERE post_status = 'publish' AND post_type IN ($placeholders) ORDER BY ID ASC LIMIT %d OFFSET %d",
 				...$query_args
 			)
 		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 
 		if ( empty( $posts ) ) {
 			update_option( 'cwp_topology_last_rebuild', current_time( 'mysql' ) );
@@ -343,24 +344,6 @@ class WP_MCP_Connect_Topology {
 			$in_map[ (int) $row['pid'] ] = (int) $row['cnt'];
 		}
 
-		// Pre-fetch GSC data for all node post IDs in one query.
-		$gsc_table = WP_MCP_Connect_GSC::get_table_name( WP_MCP_Connect_GSC::TABLE_DATA );
-		$gsc_map   = array();
-		if ( ! empty( $ids ) ) {
-			$placeholders = implode( ', ', array_fill( 0, count( $ids ), '%d' ) );
-			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			$gsc_rows = $wpdb->get_results(
-				$wpdb->prepare( "SELECT post_id, impressions, clicks FROM $gsc_table WHERE post_id IN ($placeholders)", ...$ids ),
-				ARRAY_A
-			);
-			foreach ( $gsc_rows as $row ) {
-				$gsc_map[ (int) $row['post_id'] ] = array(
-					'impressions' => (int) $row['impressions'],
-					'clicks'      => (int) $row['clicks'],
-				);
-			}
-		}
-
 		// Build nodes.
 		$nodes = array();
 		foreach ( $ids as $pid ) {
@@ -375,8 +358,6 @@ class WP_MCP_Connect_Topology {
 				'url'         => get_permalink( $pid ),
 				'inlinks'     => $in_map[ $pid ] ?? 0,
 				'outlinks'    => $out_map[ $pid ] ?? 0,
-				'impressions' => $gsc_map[ (int) $pid ]['impressions'] ?? 0,
-				'clicks'      => $gsc_map[ (int) $pid ]['clicks'] ?? 0,
 			);
 		}
 
@@ -399,11 +380,12 @@ class WP_MCP_Connect_Topology {
 		$table = self::table_name();
 
 		// Outlinks.
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$outlinks_raw = $wpdb->get_results(
 			$wpdb->prepare( "SELECT target_post_id, anchor_text FROM $table WHERE source_post_id = %d", $post_id ),
 			ARRAY_A
 		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		$outlinks = array();
 		foreach ( $outlinks_raw as $row ) {
 			$outlinks[] = array(
@@ -415,11 +397,12 @@ class WP_MCP_Connect_Topology {
 		}
 
 		// Inlinks.
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$inlinks_raw = $wpdb->get_results(
 			$wpdb->prepare( "SELECT source_post_id, anchor_text FROM $table WHERE target_post_id = %d", $post_id ),
 			ARRAY_A
 		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		$inlinks = array();
 		foreach ( $inlinks_raw as $row ) {
 			$inlinks[] = array(
@@ -461,22 +444,24 @@ class WP_MCP_Connect_Topology {
 		$type_placeholder = implode( ', ', array_fill( 0, count( $public_types ), '%s' ) );
 		$type_values      = array_values( $public_types );
 
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$orphan_pages = (int) $wpdb->get_var(
 			$wpdb->prepare(
 				"SELECT COUNT(*) FROM {$wpdb->posts} p WHERE p.post_status = 'publish' AND p.post_type IN ($type_placeholder) AND p.ID NOT IN (SELECT DISTINCT target_post_id FROM $table)",
 				...$type_values
 			)
 		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 
 		// Dead ends: published posts with zero outlinks.
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$dead_ends = (int) $wpdb->get_var(
 			$wpdb->prepare(
 				"SELECT COUNT(*) FROM {$wpdb->posts} p WHERE p.post_status = 'publish' AND p.post_type IN ($type_placeholder) AND p.ID NOT IN (SELECT DISTINCT source_post_id FROM $table)",
 				...$type_values
 			)
 		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 
 		return array(
 			'total_links'  => $total_links,
@@ -505,7 +490,9 @@ class WP_MCP_Connect_Topology {
 		$type_placeholder = implode( ', ', array_fill( 0, count( $public_types ), '%s' ) );
 		$type_values      = array_values( $public_types );
 
-		$offset = ( max( 1, (int) $page ) - 1 ) * max( 1, min( 100, (int) $per_page ) );
+		$page     = max( 1, (int) $page );
+		$per_page = max( 1, min( 100, (int) $per_page ) );
+		$offset   = ( $page - 1 ) * $per_page;
 
 		$where_extra = '';
 		if ( 'orphans' === $filter ) {
@@ -520,7 +507,7 @@ class WP_MCP_Connect_Topology {
 		$query_args[] = (int) $per_page;
 		$query_args[] = (int) $offset;
 
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$posts = $wpdb->get_results(
 			$wpdb->prepare(
 				"SELECT p.ID, p.post_title, p.post_type FROM {$wpdb->posts} p WHERE p.post_status = 'publish' AND p.post_type IN ($type_placeholder) $where_extra ORDER BY p.ID DESC LIMIT %d OFFSET %d",
@@ -528,34 +515,57 @@ class WP_MCP_Connect_Topology {
 			),
 			ARRAY_A
 		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 
 		// Count total for pagination.
 		$count_args = $type_values;
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$total = (int) $wpdb->get_var(
 			$wpdb->prepare(
 				"SELECT COUNT(*) FROM {$wpdb->posts} p WHERE p.post_status = 'publish' AND p.post_type IN ($type_placeholder) $where_extra",
 				...$count_args
 			)
 		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 
-		// Collect link counts.
+		// Collect link counts for this page of posts in two grouped queries
+		// instead of two COUNT(*) queries per row.
+		$in_counts  = array();
+		$out_counts = array();
+		$page_ids   = array_map( 'intval', wp_list_pluck( $posts, 'ID' ) );
+		if ( ! empty( $page_ids ) ) {
+			$id_placeholder = implode( ', ', array_fill( 0, count( $page_ids ), '%d' ) );
+			// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
+			$in_rows = $wpdb->get_results(
+				$wpdb->prepare( "SELECT target_post_id AS pid, COUNT(*) AS c FROM $table WHERE target_post_id IN ($id_placeholder) GROUP BY target_post_id", ...$page_ids ),
+				ARRAY_A
+			);
+			// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+			// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
+			$out_rows = $wpdb->get_results(
+				$wpdb->prepare( "SELECT source_post_id AS pid, COUNT(*) AS c FROM $table WHERE source_post_id IN ($id_placeholder) GROUP BY source_post_id", ...$page_ids ),
+				ARRAY_A
+			);
+			// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+			foreach ( (array) $in_rows as $r ) {
+				$in_counts[ (int) $r['pid'] ] = (int) $r['c'];
+			}
+			foreach ( (array) $out_rows as $r ) {
+				$out_counts[ (int) $r['pid'] ] = (int) $r['c'];
+			}
+		}
+
 		$results = array();
 		foreach ( $posts as $row ) {
 			$pid = (int) $row['ID'];
-
-			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			$in_count  = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM $table WHERE target_post_id = %d", $pid ) );
-			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			$out_count = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM $table WHERE source_post_id = %d", $pid ) );
 
 			$results[] = array(
 				'id'       => $pid,
 				'title'    => $row['post_title'],
 				'type'     => $row['post_type'],
 				'url'      => get_permalink( $pid ),
-				'inlinks'  => $in_count,
-				'outlinks' => $out_count,
+				'inlinks'  => isset( $in_counts[ $pid ] ) ? $in_counts[ $pid ] : 0,
+				'outlinks' => isset( $out_counts[ $pid ] ) ? $out_counts[ $pid ] : 0,
 			);
 		}
 
@@ -581,20 +591,26 @@ class WP_MCP_Connect_Topology {
 		global $wpdb;
 		$table = self::table_name();
 
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		if ( $wpdb->get_var( "SHOW TABLES LIKE '{$table}'" ) !== $table ) {
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 			return array( 'error' => 'Link graph not built yet. Run a topology rebuild first.' );
 		}
 
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$edge_count = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table}" );
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		if ( $edge_count > 50000 ) {
 			return array( 'error' => 'Link graph too large for in-memory analysis (' . number_format( $edge_count ) . ' edges). Consider analyzing subsets via the audit endpoint.' );
 		}
 
 		// Build adjacency list from DB
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$edges = $wpdb->get_results(
 			"SELECT source_post_id, target_post_id FROM {$table}",
 			ARRAY_A
 		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
 		$adjacency = array();
 		foreach ( $edges as $edge ) {
@@ -643,12 +659,13 @@ class WP_MCP_Connect_Topology {
 		// Get all published posts to find unreachable ones
 		$post_types   = get_post_types( array( 'public' => true ), 'names' );
 		$placeholders = implode( ',', array_fill( 0, count( $post_types ), '%s' ) );
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$all_posts = $wpdb->get_col( $wpdb->prepare(
 			"SELECT ID FROM {$wpdb->posts}
 			 WHERE post_status = 'publish' AND post_type IN ({$placeholders})",
 			...array_values( $post_types )
 		) );
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 
 		// Build distribution
 		$distribution = array();
@@ -739,7 +756,9 @@ class WP_MCP_Connect_Topology {
 			return array( 'error' => 'Link graph not built yet.' );
 		}
 
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$edge_count = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table}" );
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		if ( $edge_count > 50000 ) {
 			return array( 'error' => 'Link graph too large for in-memory analysis (' . number_format( $edge_count ) . ' edges). Consider analyzing subsets via the audit endpoint.' );
 		}
@@ -875,6 +894,26 @@ class WP_MCP_Connect_Topology {
 				'methods'             => 'GET',
 				'callback'            => array( $this, 'rest_get_audit' ),
 				'permission_callback' => array( $this, 'check_permission' ),
+				'args'                => array(
+					'filter'   => array(
+						'type'    => 'string',
+						'default' => 'all',
+						'enum'    => array( 'all', 'orphans', 'dead_ends' ),
+					),
+					'page'     => array(
+						'type'              => 'integer',
+						'default'           => 1,
+						'minimum'           => 1,
+						'sanitize_callback' => 'absint',
+					),
+					'per_page' => array(
+						'type'              => 'integer',
+						'default'           => 20,
+						'minimum'           => 1,
+						'maximum'           => 100,
+						'sanitize_callback' => 'absint',
+					),
+				),
 			)
 		);
 
@@ -906,7 +945,7 @@ class WP_MCP_Connect_Topology {
 	 * @return bool
 	 */
 	public function check_permission() {
-		return current_user_can( 'manage_options' );
+		return WP_MCP_Connect_Auth::check_capability( 'manage_options' );
 	}
 
 	/**

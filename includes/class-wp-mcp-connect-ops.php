@@ -17,6 +17,22 @@ class WP_MCP_Connect_Ops {
 	const TABLE_NAME = 'cwp_ops_log';
 
 	/**
+	 * Retention: keep at most this many operations...
+	 */
+	const MAX_ROWS = 200;
+
+	/**
+	 * ...and none older than this many days. Rollback is only offered for
+	 * rows that survive both limits.
+	 */
+	const MAX_AGE_DAYS = 90;
+
+	/**
+	 * Daily prune cron hook.
+	 */
+	const PRUNE_HOOK = 'cwp_ops_prune_event';
+
+	/**
 	 * Create the ops log table.
 	 *
 	 * @since 1.0.0
@@ -91,6 +107,64 @@ class WP_MCP_Connect_Ops {
 	}
 
 	/**
+	 * Prune the ops log to MAX_ROWS newest rows and MAX_AGE_DAYS.
+	 *
+	 * Each row can hold a multi-megabyte previous_state snapshot (a full
+	 * redirect table per import), so without this the table grows without
+	 * bound.
+	 *
+	 * @since 1.0.5
+	 * @return int Rows deleted.
+	 */
+	public static function prune_old_ops() {
+		global $wpdb;
+		$table   = $wpdb->prefix . self::TABLE_NAME;
+		$deleted = 0;
+
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
+		$deleted += (int) $wpdb->query( $wpdb->prepare(
+			"DELETE FROM $table WHERE created_at < %s",
+			gmdate( 'Y-m-d H:i:s', time() - ( self::MAX_AGE_DAYS * DAY_IN_SECONDS ) )
+		) );
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
+		$cutoff_id = $wpdb->get_var( $wpdb->prepare(
+			"SELECT id FROM $table ORDER BY id DESC LIMIT 1 OFFSET %d",
+			self::MAX_ROWS
+		) );
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		if ( $cutoff_id ) {
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$deleted += (int) $wpdb->query( $wpdb->prepare( "DELETE FROM $table WHERE id <= %d", (int) $cutoff_id ) );
+		}
+
+		return $deleted;
+	}
+
+	/**
+	 * Schedule the daily prune if not already scheduled.
+	 *
+	 * @since 1.0.5
+	 * @return void
+	 */
+	public static function maybe_schedule_prune() {
+		if ( ! wp_next_scheduled( self::PRUNE_HOOK ) ) {
+			wp_schedule_event( time() + 900, 'daily', self::PRUNE_HOOK );
+		}
+	}
+
+	/**
+	 * Cron callback.
+	 *
+	 * @since 1.0.5
+	 * @return void
+	 */
+	public function handle_prune_cron() {
+		self::prune_old_ops();
+	}
+
+	/**
 	 * Register routes.
 	 *
 	 * @since 1.0.0
@@ -131,7 +205,7 @@ class WP_MCP_Connect_Ops {
 	 * @return bool
 	 */
 	public function check_permission() {
-		return current_user_can( 'manage_options' );
+		return WP_MCP_Connect_Auth::check_capability( 'manage_options' );
 	}
 
 	/**
@@ -157,6 +231,7 @@ class WP_MCP_Connect_Ops {
 			$params[] = $op_type;
 		}
 
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
 				"SELECT id, op_type, status, user_id, created_at FROM {$table} {$where} ORDER BY created_at DESC LIMIT %d OFFSET %d",
@@ -164,14 +239,17 @@ class WP_MCP_Connect_Ops {
 			),
 			ARRAY_A
 		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
 		if ( ! empty( $params ) ) {
+			// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 			$total = (int) $wpdb->get_var(
 				$wpdb->prepare(
 					"SELECT COUNT(*) FROM {$table} {$where}",
 					$params
 				)
 			);
+			// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		} else {
 			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is controlled.
 			$total = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} {$where}" );
@@ -198,7 +276,9 @@ class WP_MCP_Connect_Ops {
 		$table = $wpdb->prefix . self::TABLE_NAME;
 		$id = (int) $request->get_param( 'id' );
 
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is $wpdb->prefix + a literal; other interpolations are generated %s/%d placeholder lists or literal SQL. All caller input is bound via prepare().
 		$row = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE id = %d", $id ), ARRAY_A );
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		if ( ! $row ) {
 			return new WP_Error( 'not_found', __( 'Operation not found.', 'wp-mcp-connect' ), array( 'status' => 404 ) );
 		}
@@ -321,6 +401,12 @@ class WP_MCP_Connect_Ops {
 			update_post_meta( $post_id, '_cwp_status_code', (int) $redirect['status_code'] );
 			update_post_meta( $post_id, '_cwp_enabled', isset( $redirect['enabled'] ) ? (int) $redirect['enabled'] : 1 );
 		}
+
+		// Rebuild the serving cache now rather than waiting for the debounced
+		// cron event: a rollback to an empty snapshot inserts nothing, so no
+		// save_post hook would ever fire and the old rules would stay live.
+		do_action( 'cwp_rebuild_redirect_cache' );
+
 		return true;
 	}
 

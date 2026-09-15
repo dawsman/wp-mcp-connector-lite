@@ -63,10 +63,30 @@ class WP_MCP_Connect_API_Test extends WP_UnitTestCase {
         $this->assertArrayHasKey( 'site_name', $data );
         $this->assertArrayHasKey( 'site_url', $data );
         $this->assertArrayHasKey( 'wp_version', $data );
-        $this->assertArrayHasKey( 'php_version', $data );
-        $this->assertArrayHasKey( 'theme', $data );
-        $this->assertArrayHasKey( 'plugins', $data );
+        $this->assertArrayHasKey( 'timezone', $data );
+        $this->assertArrayHasKey( 'active_theme', $data );
+        $this->assertArrayHasKey( 'active_plugin_count', $data );
+        $this->assertArrayHasKey( 'seo_plugin', $data );
         $this->assertArrayHasKey( 'plugin_version', $data );
+
+        // Sensitive fields are withheld unless ?details=true is requested.
+        $this->assertArrayNotHasKey( 'php_version', $data );
+        $this->assertArrayNotHasKey( 'plugins', $data );
+    }
+
+    public function test_system_endpoint_details_includes_sensitive_fields() {
+        wp_set_current_user( self::$admin_id );
+
+        $request = new WP_REST_Request( 'GET', '/mcp/v1/system' );
+        $request->set_param( 'details', 'true' );
+        $response = $this->server->dispatch( $request );
+
+        $this->assertEquals( 200, $response->get_status() );
+
+        $data = $response->get_data();
+        $this->assertArrayHasKey( 'php_version', $data );
+        $this->assertArrayHasKey( 'plugins', $data );
+        $this->assertEquals( phpversion(), $data['php_version'] );
     }
 
     public function test_search_endpoint_requires_editor() {
@@ -139,7 +159,7 @@ class WP_MCP_Connect_API_Test extends WP_UnitTestCase {
 
     public function test_rate_limiting() {
         wp_set_current_user( self::$admin_id );
-        delete_transient( 'cwp_rate_limit_' . self::$admin_id );
+        delete_transient( 'cwp_rate_limit_user_' . self::$admin_id );
 
         for ( $i = 0; $i < 60; $i++ ) {
             $request = new WP_REST_Request( 'GET', '/mcp/v1/system' );
